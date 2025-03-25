@@ -1,35 +1,46 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import React, { useState } from 'react';
+import './App.css';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [resumeText, setResumeText] = useState('');
+  const [jobText, setJobText] = useState('');
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = () => {
+    if (resumeText.trim() && jobText.trim()) {
+      console.log('Resume:', resumeText);
+      console.log('Job Description:', jobText);
+      setSubmitted(true);
+    } else {
+      alert('Please fill out both fields before submitting.');
+    }
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="container">
+      <h1>Interview Evaluator</h1>
+      <div className="textbox-wrapper">
+        <div className="textbox">
+          <h2>Resume</h2>
+          <textarea
+            value={resumeText}
+            onChange={(e) => setResumeText(e.target.value)}
+            placeholder="Paste your resume here..."
+          />
+        </div>
+        <div className="textbox">
+          <h2>Job Description</h2>
+          <textarea
+            value={jobText}
+            onChange={(e) => setJobText(e.target.value)}
+            placeholder="Paste job description here..."
+          />
+        </div>
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+      <button onClick={handleSubmit}>Submit</button>
+      {submitted && <p>Text submitted successfully. Ready for analysis!</p>}
+    </div>
+  );
 }
 
-export default App
+export default App;
