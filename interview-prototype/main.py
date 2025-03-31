@@ -13,100 +13,20 @@ from ui.main_window import InterviewApp
 
 # --- Constants ---
 ICON_PATH = "icons"
+QSS_FILE = os.path.join("ui", "styles.qss") # Path to the QSS file
 
-# --- QSS Stylesheet ---
-STYLE_SHEET = """
-/* Global Rounded Corners for specific widget types */
-QGroupBox, QLineEdit, QTextEdit, QPushButton {
-    border-radius: 8px;
-    /* Exclude QSpinBox if it were still present */
-}
-
-/* Style for QGroupBox Frame */
-QGroupBox {
-    border: 1px solid #555555;
-    margin-top: 10px;
-}
-
-/* Style for QGroupBox Title */
-QGroupBox::title {
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    padding: 0 5px 0 5px;
-    margin-left: 5px;
-}
-
-
-/* Specific Button Styling (Submit, Start, Select) - Default Style */
-QPushButton {
-    background-color: white;
-    color: black;
-    border: 1px solid #BBBBBB;
-    padding: 5px 10px;
-    min-height: 20px;
-    /* border-radius inherited */
-}
-
-/* General Button States */
-QPushButton:hover {
-    background-color: #F0F0F0;
-    border-color: #999999;
-}
-
-QPushButton:pressed {
-    background-color: #E0E0E0;
-    border-color: #777777;
-}
-
-QPushButton:disabled {
-    background-color: #DCDCDC;
-    color: #A0A0A0;
-    border-color: #C0C0C0;
-}
-
-/* --- MODIFIED Styling for the custom +/- buttons --- */
-QPushButton#adjustButton {
-    background-color: white;     /* CHANGE: Make background white */
-    border: 1px solid #AAAAAA;   /* CHANGE: Slightly darker border for white bg */
-    color: black;                /* CHANGE: Ensure icon tint (if applicable) is dark */
-    min-height: 20px;
-    min-width: 20px;
-    padding: 2px;
-    /* border-radius inherited */
-}
-
-QPushButton#adjustButton:hover {
-    background-color: #F0F0F0;   /* CHANGE: Consistent hover with other buttons */
-    border-color: #888888;
-}
-
-QPushButton#adjustButton:pressed {
-    background-color: #E0E0E0;   /* CHANGE: Consistent press with other buttons */
-    border-color: #666666;
-}
-
-QPushButton#adjustButton:disabled {
-    background-color: #EAEAEA;   /* CHANGE: Lighter disabled for white bg */
-    border-color: #C0C0C0;
-    /* Icon should auto-disable or appear grayed out */
-}
-/* --- END MODIFICATION --- */
-
-
-/* Ensure TextEdit and LineEdit have visible borders with the radius */
-QTextEdit, QLineEdit {
-   border: 1px solid #555555;
-   padding: 2px; /* Add slight padding inside */
-   /* border-radius inherited */
-}
-
-/* Style QLabels used for displaying numbers */
-/* If needed, add objectName to QLabel in components.py and style here */
-/* Example: QLabel#numberDisplayLabel { border: none; background: transparent; } */
-
-
-/* Checkboxes use default theme style */
-"""
+# --- Function to load Stylesheet ---
+def load_stylesheet(filepath):
+    """Loads QSS data from a file."""
+    try:
+        with open(filepath, "r") as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"Warning: Stylesheet file not found at '{filepath}'. Using default styles.")
+        return ""
+    except Exception as e:
+        print(f"Warning: Could not load stylesheet from '{filepath}': {e}")
+        return ""
 
 # --- Main Execution ---
 if __name__ == "__main__":
@@ -122,23 +42,24 @@ if __name__ == "__main__":
     # Create the main application instance
     q_app = QApplication(sys.argv)
 
-    # --- APPLY THE STYLESHEET ---
-    q_app.setStyleSheet(STYLE_SHEET)
-    # ---------------------------
+    # --- LOAD AND APPLY THE STYLESHEET ---
+    style_sheet_content = load_stylesheet(QSS_FILE)
+    if style_sheet_content:
+        q_app.setStyleSheet(style_sheet_content)
+    # ------------------------------------
 
     if not os.path.exists(".env"):
          QMessageBox.warning(None, "Configuration Warning", f"'.env' file not found...")
 
     # --- Microphone Check ---
-    # (Keep the microphone check code as before)
     stt_backend_found = False; audio_lib = "Not Checked"; mic_warning_message = ""
-    try:
+    try: # Sounddevice check
         import sounddevice as sd
         if sd.query_devices(kind='input'):
             print("Audio Input Check: Found input devices via sounddevice.")
             stt_backend_found = True; audio_lib = "sounddevice"
         else: mic_warning_message = "No input devices found via sounddevice."
-    except Exception as e_sd:
+    except Exception as e_sd: # PyAudio fallback check
         print(f"Audio Input Check: sounddevice failed ({e_sd}). Trying PyAudio...")
         try:
             import pyaudio; p = pyaudio.PyAudio()
@@ -152,11 +73,10 @@ if __name__ == "__main__":
             if input_devices_found: print("Audio Input Check: Found PyAudio input devices."); stt_backend_found = True; audio_lib = "PyAudio"
             else: mic_warning_message = "No input devices found via PyAudio."
         except Exception as e_pa: mic_warning_message = f"Audio check failed: {e_sd}, {e_pa}"
-    if not stt_backend_found:
+    if not stt_backend_found: # Show warning if no input found
         full_warning = f"{mic_warning_message}\n\nSpeech input may not function."
         QMessageBox.warning(None, "Audio Input Warning", full_warning)
     # --- End Microphone Check ---
-
 
     # Create and show the main window
     app_window = InterviewApp(icon_path=ICON_PATH)
