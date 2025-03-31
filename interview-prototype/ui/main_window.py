@@ -476,13 +476,22 @@ class InterviewApp(QWidget):
                 self.file_label.setText("Selection cancelled.")
             self.update_status("Resume selection cancelled.")
             return
+
+        # --- File successfully selected ---
         self.pdf_filepath = filepath
         filename = os.path.basename(filepath)
-        if hasattr(self, 'file_label'): self.file_label.setText(filename)
+
+        if hasattr(self, 'file_label'):
+            self.file_label.setText(filename)
+
+        # Enable other setup controls now that a resume is loaded
         self.set_setup_controls_state(True)
-        if hasattr(self, 'select_btn'): self.select_btn.setEnabled(False)
+
+    
         self.update_status("Resume selected. Configure interview or paste job description.")
-        if hasattr(self, 'job_desc_input'): self.job_desc_input.setFocus()
+
+        if hasattr(self, 'job_desc_input'):
+            self.job_desc_input.setFocus()
 
     def start_interview_process(self): # Navigate on success
         if not self.pdf_filepath:

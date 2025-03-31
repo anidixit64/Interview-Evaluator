@@ -42,7 +42,7 @@ def create_setup_page(parent_window):
     button_icon_size = QSize(16, 16)
 
     # --- Resume Section ---
-    resume_group = QGroupBox("1. Load Resume")
+    resume_group = QGroupBox("Load Resume")
     resume_group.setFont(parent_window.font_large_bold)
     resume_layout = QGridLayout(resume_group)
     resume_layout.setSpacing(10)
@@ -59,7 +59,7 @@ def create_setup_page(parent_window):
     resume_layout.setColumnStretch(1, 1)
 
     # --- Configuration Section ---
-    config_group = QGroupBox("2. Configure Interview")
+    config_group = QGroupBox("Configure Interview")
     config_group.setFont(parent_window.font_large_bold)
     config_layout = QHBoxLayout(config_group)
     config_layout.setSpacing(25)
@@ -131,7 +131,7 @@ def create_setup_page(parent_window):
     config_layout.addStretch()
 
     # --- Job Description Section ---
-    jd_group = QGroupBox("3. Job Description (Optional)")
+    jd_group = QGroupBox("Job Description (Optional)")
     jd_group.setFont(parent_window.font_large_bold)
     jd_layout = QVBoxLayout(jd_group)
     parent_window.job_desc_input = QTextEdit()
