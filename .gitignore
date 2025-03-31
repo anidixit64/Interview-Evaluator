@@ -1,0 +1,31 @@
+# --- Python ---
+# Virtual environment folders
+venv/
+.venv/
+env/
+*.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+
+# --- macOS ---
+.DS_Store
+
+# --- Windows ---
+Thumbs.db
+
+# --- IDE / Editor ---
+.vscode/
+.idea/
+
+# --- Application Specific ---
+recordings/
