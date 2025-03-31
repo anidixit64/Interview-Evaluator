@@ -52,17 +52,21 @@ if __name__ == "__main__":
          QMessageBox.warning(None, "Configuration Warning", f"'.env' file not found...")
 
     # --- Microphone Check ---
-    stt_backend_found = False; audio_lib = "Not Checked"; mic_warning_message = ""
+    stt_backend_found = False
+    audio_lib = "Not Checked"
+    mic_warning_message = ""
     try: # Sounddevice check
         import sounddevice as sd
         if sd.query_devices(kind='input'):
             print("Audio Input Check: Found input devices via sounddevice.")
-            stt_backend_found = True; audio_lib = "sounddevice"
+            stt_backend_found = True
+            audio_lib = "sounddevice"
         else: mic_warning_message = "No input devices found via sounddevice."
     except Exception as e_sd: # PyAudio fallback check
         print(f"Audio Input Check: sounddevice failed ({e_sd}). Trying PyAudio...")
         try:
-            import pyaudio; p = pyaudio.PyAudio()
+            import pyaudio
+            p = pyaudio.PyAudio()
             input_devices_found = False
             try:
                 if p.get_default_input_device_info()['maxInputChannels'] > 0: input_devices_found = True

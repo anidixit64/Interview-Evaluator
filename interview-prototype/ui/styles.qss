@@ -3,88 +3,69 @@
 /* Global Rounded Corners for specific widget types */
 QLineEdit, QTextEdit, QPushButton {
     border-radius: 8px;
-    /* Apply radius only to these */
 }
 
 /* Style for QGroupBox Frame - No border, use padding for title space */
 QGroupBox {
-    background-color: transparent; /* Ensure it doesn't draw its own background */
-    border: none;                 /* Simplified border removal */
-    margin: 0px;                  /* Keep margin 0 for tighter layout control */
-    padding: 18px 5px 5px 5px;    /* Increased TOP padding significantly */
-                                  /* (top, right, bottom, left) */
+    background-color: transparent;
+    border: none;
+    margin: 0px;
+    padding: 18px 5px 5px 5px;
 }
 
 /* Style for QGroupBox Title - Position naturally within top padding */
 QGroupBox::title {
-    subcontrol-origin: padding;     /* Base position on padding box */
+    subcontrol-origin: padding;
     subcontrol-position: top left;
-    padding: 0 3px;               /* Minimal padding around the title text */
-    margin-left: 5px;             /* Indent title slightly */
-    /* Color needs to contrast with the main window background */
-    color: #DDDDDD; /* Example: Light gray text for title */
+    padding: 0 3px;
+    margin-left: 5px;
+    color: #DDDDDD;
 }
 
 
-/* Specific Button Styling (Submit, Start, Select) - Default Style */
-QPushButton {
-    background-color: white;
-    color: black;
-    border: 1px solid #BBBBBB;
-    padding: 5px 10px;
-    min-height: 20px;
-    /* border-radius inherited */
-}
-
-/* General Button States */
-QPushButton:hover {
-    background-color: #F0F0F0;
-    border-color: #999999;
-}
-
-QPushButton:pressed {
-    background-color: #E0E0E0;
-    border-color: #777777;
-}
-
-QPushButton:disabled {
-    background-color: #DCDCDC;
-    color: #A0A0A0;
-    border-color: #C0C0C0;
-}
-
-/* Styling for the custom +/- buttons */
-QPushButton#adjustButton {
-    background-color: white;
-    border: 1px solid #AAAAAA;
-    color: black;
-    min-height: 20px;
-    min-width: 20px;
-    padding: 2px;
-    /* border-radius inherited */
-}
-
-QPushButton#adjustButton:hover {
-    background-color: #F0F0F0;
-    border-color: #888888;
-}
-
-QPushButton#adjustButton:pressed {
-    background-color: #E0E0E0;
-    border-color: #666666;
-}
-
-QPushButton#adjustButton:disabled {
-    background-color: #EAEAEA;
-    border-color: #C0C0C0;
-}
+/* --- Button Styling --- */
+/* ... (Keep all QPushButton rules as before) ... */
+QPushButton { background-color: white; color: black; border: 1px solid #BBBBBB; padding: 5px 10px; min-height: 20px; }
+QPushButton:hover { background-color: #F0F0F0; border-color: #999999; }
+QPushButton:pressed { background-color: #E0E0E0; border-color: #777777; }
+QPushButton:disabled { background-color: #DCDCDC; color: #A0A0A0; border-color: #C0C0C0; }
+QPushButton#adjustButton { background-color: white; border: 1px solid #AAAAAA; color: black; min-height: 20px; min-width: 20px; padding: 2px; }
+QPushButton#adjustButton:hover { background-color: #F0F0F0; border-color: #888888; }
+QPushButton#adjustButton:pressed { background-color: #E0E0E0; border-color: #666666; }
+QPushButton#adjustButton:disabled { background-color: #EAEAEA; border-color: #C0C0C0; }
+QPushButton#recordSubmitButton { min-height: 30px; }
 
 
-/* Ensure TextEdit and LineEdit still have borders */
+/* --- Input/Text Area Styling --- */
 QTextEdit, QLineEdit {
-   border: 1px solid #555555; /* Keep border for text inputs */
-   padding: 2px;
-   /* border-radius inherited */
+   border: 1px solid #555555;
+   padding: 3px;
+   background-color: #383838;
+   color: #E0E0E0;
 }
+QTextEdit:disabled, QLineEdit:disabled { background-color: #404040; color: #888888; }
+QTextEdit:read-only, QLineEdit:read-only { background-color: #303030; color: #AAAAAA; }
+
+
+/* --- Progress Indicator --- */
+QLabel#progressIndicator {
+    color: #AAAAAA; /* Color for non-active steps */
+    font-weight: normal;
+    padding: 5px;
+}
+
+/* --- REMOVED RULE for Active Step --- */
+/* QLabel#progressIndicator b { ... } */
+
+
+/* --- Status Bar --- */
+QLabel#statusBar {
+    color: #E0E0E0;
+    background-color: #1E1E1E;
+    padding: 4px 8px;
+    border-top: 1px solid #555555;
+    min-height: 18px;
+}
+
 
 /* Checkboxes use default theme style */

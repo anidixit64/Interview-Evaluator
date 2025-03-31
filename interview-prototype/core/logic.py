@@ -5,7 +5,7 @@ import os
 import google.generativeai as genai
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
-# REMOVED: from tkinter import messagebox # Keep for error reporting within logic functions
+# REMOVED: from tkinter import messagebox
 import sys # For potentially exiting on critical config error
 
 # --- Default Configuration & Constants ---
@@ -32,8 +32,6 @@ def configure_gemini():
     if not api_key:
         # Critical error, print and exit is acceptable before UI starts
         print(f"{ERROR_PREFIX}GOOGLE_API_KEY not found in .env file.\nPlease create a .env file in the same directory with your API key:\nGOOGLE_API_KEY=YOUR_API_KEY")
-        # messagebox.showerror("API Key Error", ...) # REMOVED
-        # Instead of showing a Tk box, we print and the main.py startup check handles user feedback
         return False # Signal failure
     try:
         genai.configure(api_key=api_key)
@@ -41,7 +39,6 @@ def configure_gemini():
         return True
     except Exception as e:
         print(f"{ERROR_PREFIX}Configuring Gemini API: {e}")
-        # messagebox.showerror("API Config Error", ...) # REMOVED
         return False
 
 def extract_text_from_pdf(pdf_path):
@@ -52,7 +49,6 @@ def extract_text_from_pdf(pdf_path):
     """
     if not pdf_path or not os.path.exists(pdf_path):
         print(f"{ERROR_PREFIX}Invalid or non-existent PDF path provided: {pdf_path}")
-        # messagebox.showerror("File Error", ...) # REMOVED
         return None
     print(f"Reading PDF: {pdf_path}...")
     try:
@@ -65,14 +61,11 @@ def extract_text_from_pdf(pdf_path):
 
         if not text.strip():
             print(f"Warning: No text could be extracted from '{os.path.basename(pdf_path)}'. The PDF might be image-based or empty.")
-            # messagebox.showwarning("Extraction Warning", ...) # REMOVED
-            # Return empty string or None? Let's return None to clearly signal potential issue.
-            return None
+            return None # Return None to clearly signal potential issue.
         print("PDF text extracted successfully.")
         return text
     except Exception as e:
         print(f"{ERROR_PREFIX}Reading PDF '{os.path.basename(pdf_path)}': {e}")
-        # messagebox.showerror("PDF Read Error", ...) # REMOVED
         return None
 
 def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_NAME, num_questions=DEFAULT_NUM_TOPICS):
@@ -84,7 +77,6 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
     print(f"Generating {num_questions} initial questions using {model_name}...")
     if not resume_text:
         print(f"{ERROR_PREFIX}Cannot generate questions without resume text.")
-        # messagebox.showerror("Generation Error", ...) # REMOVED
         return None
     try:
         model = genai.GenerativeModel(model_name)
@@ -121,7 +113,6 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
              safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
              error_message = f"Received empty or blocked response for initial questions.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
              print(f"{ERROR_PREFIX}Initial Questions Generation: {error_message}")
-             # messagebox.showerror("Generation Error", error_message) # REMOVED
              return None # Signal failure
 
         # Process successful response
@@ -152,12 +143,10 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
             if len(questions) < num_questions:
                 # This is just informational, not an error
                 print(f"Note: Model generated {len(questions)} initial questions (requested {num_questions}). This might happen if input is short or model couldn't find enough distinct points.")
-                # messagebox.showinfo("Generation Note", ...) # REMOVED
             return questions
         else:
             # Model responded but parsing failed or gave empty list
             print(f"Warning: Model response for initial questions was empty or not in the expected numbered list format after parsing:\n\n{generated_text}")
-            # messagebox.showwarning("Generation Warning", ...) # REMOVED
             return None # Signal potential issue
 
     except Exception as e:
@@ -165,7 +154,6 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
         if "400" in str(e) and ("prompt" in str(e).lower() or "request payload" in str(e).lower() or "resource exhausted" in str(e).lower()):
              err_msg += f"\n\n{ERROR_PREFIX}Error 400 or Resource Exhausted: The combined text (Resume + Job Description) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs or a model with a larger context window if available."
         print(f"{ERROR_PREFIX}{err_msg}")
-        # messagebox.showerror("Generation Error", err_msg) # REMOVED
         return None
 
 def generate_follow_up_question(context_question, user_answer, conversation_history, model_name=MODEL_NAME):
@@ -233,14 +221,13 @@ def generate_follow_up_question(context_question, user_answer, conversation_hist
 
     except Exception as e:
         print(f"{ERROR_PREFIX}Generating follow-up question: {e}")
-        # messagebox.showerror("Generation Error", ...) # REMOVED
         # Return None to indicate an error occurred, distinct from "[END TOPIC]"
         return None
 
 def generate_summary_review(full_history, model_name=MODEL_NAME):
     """
     Generates a performance summary and review based on the interview transcript.
-    Returns the summary string, or an error string starting with ERROR_PREFIX.
+    Returns the summary string (Markdown formatted), or an error string starting with ERROR_PREFIX.
     Prints errors to console.
     """
     print(f"Generating interview summary and review using {model_name}...")
@@ -250,26 +237,24 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
     try:
         model = genai.GenerativeModel(model_name)
 
-        # Prepare transcript, limiting length to avoid exceeding model limits
+        # Prepare transcript, limiting length
         transcript_parts = []
         total_len = 0
-        # Limit context reasonably (e.g., ~15k chars, adjust as needed for model)
         max_len = 15000
         for item in reversed(full_history):
             q_part = f"Interviewer Q: {item['q']}\n"
             a_part = f"Candidate A: {item['a']}\n\n"
             item_len = len(q_part) + len(a_part)
             if total_len + item_len < max_len:
-                # Prepend to keep chronological order correct at the end
                 transcript_parts.insert(0, a_part)
                 transcript_parts.insert(0, q_part)
                 total_len += item_len
             else:
-                # Add truncation marker at the beginning
                 transcript_parts.insert(0, "[... earlier parts truncated ...]\n\n")
                 break
-        transcript = "".join(transcript_parts) # Already in correct order
+        transcript = "".join(transcript_parts)
 
+        # --- UPDATED PROMPT ---
         prompt = f"""
         Act as an objective hiring manager critically reviewing a candidate's screening interview performance based ONLY on the transcript below. Your goal is to assess their communication, clarity, and the substance of their answers in this specific conversation.
 
@@ -278,28 +263,29 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
         {transcript}
         ---
 
-        Provide the following analysis:
+        Provide the following analysis using simple Markdown for formatting (e.g., **bold** for headings, `-` for list items):
 
-        1.  **Overall Communication & Approach:**
-            *   Briefly describe the candidate's communication style (e.g., clear, concise, verbose, hesitant, articulate, structured).
-            *   Did they generally seem prepared? Did they appear to understand the questions?
-            *   How did they structure their answers (e.g., used STAR method, provided specific examples, gave high-level responses, anecdotal)? Assess the effectiveness.
+        **1. Overall Communication & Approach:**
+            - Communication style: ...
+            - Preparedness: ...
+            - Answer Structure & Effectiveness: ...
 
-        2.  **Strengths in Responses:**
-            *   List 2-3 specific strengths observed *in their answers or communication*.
-            *   Focus on aspects like clarity, relevance, depth of explanation, demonstrating specific skills/experiences with concrete examples, enthusiasm, or professionalism *evident in the text*.
-            *   Cite brief evidence/examples directly from the transcript. (e.g., "Clear explanation of [Specific Task] using STAR in response to Q about X.", "Showed enthusiasm when discussing [Technology Y].")
+        **2. Strengths in Responses:**
+            - Strength 1: ... (Evidence: ...)
+            - Strength 2: ... (Evidence: ...)
+            - Strength 3: ... (Evidence: ...)
 
-        3.  **Areas for Improvement in Responses:**
-            *   List 2-3 specific areas where responses could have been stronger *in this conversation*.
-            *   Focus on aspects like vagueness, lack of specific examples, difficulty answering, rambling, not directly addressing the question, potential inconsistencies, or missed opportunities to showcase skills.
-            *   Cite brief evidence/examples. (e.g., "Vague answer regarding [Topic Z], lacked specific metrics.", "Struggled to recall details for the question about [Project Q].", "Did not fully answer the part about [Specific Challenge] in Q about Y.")
+        **3. Areas for Improvement in Responses:**
+            - Area 1: ... (Evidence: ...)
+            - Area 2: ... (Evidence: ...)
+            - Area 3: ... (Evidence: ...)
 
-        4.  **Overall Impression (from this interview only):**
-            *   Based *only on this transcript*, what is your overall impression of the candidate's performance *in this specific interview setting*? (e.g., Strong performance, clear communicator; Showed potential but needs further probing on X; Some concerning gaps in communication/examples related to Y; Performance inconsistent).
+        **4. Overall Impression (from this interview only):**
+            - Impression: ...
 
-        Format the output clearly using the specified headings (including the numbers). Do not invent information not present in the transcript. Ensure the analysis is balanced and constructive.
+        Ensure the analysis is balanced and constructive based ONLY on the transcript.
         """
+        # --- END UPDATED PROMPT ---
 
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -316,23 +302,21 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
             safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
             error_message = f"Empty or blocked response for Summary/Review.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
             print(f"{ERROR_PREFIX}Summary/Review Generation: {error_message}")
-            # messagebox.showerror("Review Generation Error", ...) # REMOVED
             return f"{ERROR_PREFIX}Could not generate summary/review. Reason: {block_reason}"
 
         print("Summary/review generated.")
-        return response.text.strip()
+        return response.text.strip() # Return the Markdown formatted text
 
     except Exception as e:
         error_message = f"Generating summary/review: {e}"
         print(f"{ERROR_PREFIX}{error_message}")
-        # messagebox.showerror("Review Generation Error", ...) # REMOVED
         return f"{ERROR_PREFIX}Could not generate summary/review.\nDetails: {e}"
 
 
 def generate_qualification_assessment(resume_text, job_desc_text, full_history, model_name=MODEL_NAME):
     """
     Generates an assessment of candidate qualifications against the job description.
-    Returns the assessment string, or an error string starting with ERROR_PREFIX.
+    Returns the assessment string (Markdown formatted), or an error string starting with ERROR_PREFIX.
     Prints errors to console.
     """
     print(f"Generating qualification assessment using {model_name}...")
@@ -349,7 +333,7 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
         # Prepare transcript, limiting length
         transcript_parts = []
         total_len = 0
-        max_len = 20000 # Allow slightly more context for assessment
+        max_len = 20000
         if full_history:
             for item in reversed(full_history):
                 q_part = f"Interviewer Q: {item['q']}\n"
@@ -366,6 +350,7 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
         else:
             transcript = "N/A (No interview conducted or history available)"
 
+        # --- UPDATED PROMPT ---
         prompt = f"""
         Act as a meticulous recruiter evaluating a candidate's potential fit for a specific role. Your task is to synthesize information ONLY from the provided Job Description, Candidate's Resume, and Interview Transcript to assess alignment with the key requirements.
 
@@ -373,48 +358,31 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
         ---
         {job_desc_text}
         ---
-
         Candidate's Resume (R):
         ---
         {resume_text}
         ---
-
         Interview Transcript (T):
         ---
         {transcript}
         ---
 
-        Provide the following assessment:
+        Provide the following assessment using simple Markdown for formatting (e.g., **bold** for headings, `-` for list items):
 
-        1.  **Alignment with Key Requirements:**
-            *   Carefully read the **Job Description** and identify the most critical skills, experiences, qualifications, and responsibilities (e.g., specific technologies, years of experience, educational requirements, key duties). List 5-7 of the most important ones.
-            *   For each *key* requirement identified, assess the candidate's apparent level of alignment based *only* on the Resume and Transcript evidence. Use one of the following assessment terms:
-                *   **Strong Match:** Clear evidence in both R and T (or strong evidence in one if applicable, like a degree on R).
-                *   **Potential Match:** Some evidence in R or T, but needs further clarification or lacks depth/specific examples.
-                *   **Weak Match/Gap:** Little to no evidence in R or T, or evidence suggests lack of experience/skill.
-                *   **Insufficient Information:** Requirement not sufficiently addressed in either R or T to make a judgment.
-            *   **Crucially, justify EACH assessment** by citing specific, brief evidence (or clear lack thereof) from the Resume (indicate with 'R') and/or Transcript (indicate with 'T'). Be precise about what supports the assessment.
-            *   Example Format:
-                *   `- Requirement (from JD): 3+ years Python development for web applications`
-                *   `  Assessment: Strong Match`
-                *   `  Evidence: Resume lists 5 years Python experience including Django framework (R); Candidate discussed deploying a specific Django application in detail (T).`
-                *   `- Requirement (from JD): Experience with AWS services (S3, Lambda, EC2)`
-                *   `  Assessment: Potential Match`
-                *   `  Evidence: Resume mentions AWS certification (R); Candidate mentioned using S3 but seemed less familiar with Lambda specifics during the interview (T). Further probing needed.`
-                *   `- Requirement (from JD): Leading small project teams`
-                *   `  Assessment: Weak Match/Gap`
-                *   `  Evidence: No mention of team lead experience on Resume (R); Candidate described only individual contributor roles when asked about projects (T).`
-                *   `- Requirement (from JD): Excellent written communication skills`
-                *   `  Assessment: Insufficient Information`
-                *   `  Evidence: Resume appears well-written (R), but written skills not directly assessed in the verbal interview (T).`
+        **1. Alignment with Key Requirements:**
+            *   Identify 5-7 key requirements from the JD.
+            *   For each requirement:
+                - **Requirement:** [Requirement text from JD]
+                - **Assessment:** [Strong Match | Potential Match | Weak Match/Gap | Insufficient Information]
+                - **Evidence:** [Cite brief evidence from R and/or T, like "(R) Mentions X", "(T) Described Y"]
 
-        2.  **Overall Fit Assessment (Based on Provided Info):**
-            *   Based *solely* on the requirement alignment analysis above (JD vs. Resume & Transcript), provide a summary conclusion about the candidate's potential fit for *this specific role*.
-            *   Is the candidate likely a strong fit, a potential fit needing significant further exploration (e.g., technical assessment, second interview focusing on gaps), or likely not a suitable fit for *this role* based *only* on the requirements and the available text evidence?
-            *   Briefly explain your reasoning, highlighting the most significant strengths and potential gaps identified in section 1 *relative to the key job requirements*.
+        **2. Overall Fit Assessment (Based on Provided Info):**
+            *   Conclusion on potential fit for the role (e.g., Strong, Potential, Unlikely).
+            *   Brief reasoning highlighting key strengths/gaps relative to JD requirements.
 
-        Be objective and analytical. Your entire assessment MUST be based ONLY on the text provided in the Job Description, Resume, and Transcript. Do not make assumptions or use external knowledge. Use the specified headings and formatting clearly.
+        Base your assessment ONLY on the provided text (JD, R, T).
         """
+        # --- END UPDATED PROMPT ---
 
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -431,16 +399,14 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
             safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
             error_message = f"Empty or blocked response for Qualification Assessment.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
             print(f"{ERROR_PREFIX}Qualification Assessment Generation: {error_message}")
-            # messagebox.showerror("Assessment Error", ...) # REMOVED
             return f"{ERROR_PREFIX}Could not generate assessment. Reason: {block_reason}"
 
         print("Qualification assessment generated.")
-        return response.text.strip()
+        return response.text.strip() # Return the Markdown formatted text
 
     except Exception as e:
         err_msg = f"Generating qualification assessment: {e}"
         if "400" in str(e) and ("prompt" in str(e).lower() or "request payload" in str(e).lower() or "resource exhausted" in str(e).lower()):
              err_msg += f"\n\n{ERROR_PREFIX}Error 400 or Resource Exhausted: The combined text (JD + Resume + Transcript) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs, fewer follow-ups, or a model with a larger context window if available."
         print(f"{ERROR_PREFIX}{err_msg}")
-        # messagebox.showerror("Assessment Error", ...) # REMOVED
         return f"{ERROR_PREFIX}Could not generate assessment.\nDetails: {e}"
