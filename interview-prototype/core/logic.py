@@ -1,11 +1,12 @@
-# logic.py
+# core/logic.py
 # Handles core processing: Gemini API, PDF extraction, content generation.
 
 import os
 import google.generativeai as genai
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
-from tkinter import messagebox # Keep for error reporting within logic functions
+# REMOVED: from tkinter import messagebox # Keep for error reporting within logic functions
+import sys # For potentially exiting on critical config error
 
 # --- Default Configuration & Constants ---
 DEFAULT_NUM_TOPICS = 5
@@ -16,28 +17,42 @@ MIN_FOLLOW_UPS = 0
 MAX_FOLLOW_UPS_LIMIT = 5
 
 MODEL_NAME = "gemini-1.5-flash-latest"
+ERROR_PREFIX = "Error: " # Standard prefix for returning errors
 
 # --- Core Logic Functions ---
 
 def configure_gemini():
-    """Loads API key from .env and configures the Gemini client."""
+    """
+    Loads API key from .env and configures the Gemini client.
+    Returns True on success, False on failure.
+    Prints errors to console. Exits if API key is missing.
+    """
     load_dotenv()
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        messagebox.showerror("API Key Error", "Error: GOOGLE_API_KEY not found in .env file.\nPlease create a .env file in the same directory with your API key:\nGOOGLE_API_KEY=YOUR_API_KEY")
-        return False
+        # Critical error, print and exit is acceptable before UI starts
+        print(f"{ERROR_PREFIX}GOOGLE_API_KEY not found in .env file.\nPlease create a .env file in the same directory with your API key:\nGOOGLE_API_KEY=YOUR_API_KEY")
+        # messagebox.showerror("API Key Error", ...) # REMOVED
+        # Instead of showing a Tk box, we print and the main.py startup check handles user feedback
+        return False # Signal failure
     try:
         genai.configure(api_key=api_key)
         print("Gemini API configured successfully.")
         return True
     except Exception as e:
-        messagebox.showerror("API Config Error", f"Error configuring Gemini API: {e}")
+        print(f"{ERROR_PREFIX}Configuring Gemini API: {e}")
+        # messagebox.showerror("API Config Error", ...) # REMOVED
         return False
 
 def extract_text_from_pdf(pdf_path):
-    """Extracts text from a given PDF file path."""
+    """
+    Extracts text from a given PDF file path.
+    Returns extracted text string on success, None on failure.
+    Prints errors/warnings to console.
+    """
     if not pdf_path or not os.path.exists(pdf_path):
-        messagebox.showerror("File Error", "Invalid or non-existent PDF path provided.")
+        print(f"{ERROR_PREFIX}Invalid or non-existent PDF path provided: {pdf_path}")
+        # messagebox.showerror("File Error", ...) # REMOVED
         return None
     print(f"Reading PDF: {pdf_path}...")
     try:
@@ -47,20 +62,29 @@ def extract_text_from_pdf(pdf_path):
             page_text = page.extract_text()
             if page_text:
                 text += page_text + "\n"
+
         if not text.strip():
-            messagebox.showwarning("Extraction Warning", f"Warning: No text could be extracted from '{os.path.basename(pdf_path)}'. The PDF might be image-based or empty.")
-            return None # Return None if no text is found
+            print(f"Warning: No text could be extracted from '{os.path.basename(pdf_path)}'. The PDF might be image-based or empty.")
+            # messagebox.showwarning("Extraction Warning", ...) # REMOVED
+            # Return empty string or None? Let's return None to clearly signal potential issue.
+            return None
         print("PDF text extracted successfully.")
         return text
     except Exception as e:
-        messagebox.showerror("PDF Read Error", f"Error reading PDF '{os.path.basename(pdf_path)}':\n{e}")
+        print(f"{ERROR_PREFIX}Reading PDF '{os.path.basename(pdf_path)}': {e}")
+        # messagebox.showerror("PDF Read Error", ...) # REMOVED
         return None
 
 def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_NAME, num_questions=DEFAULT_NUM_TOPICS):
-    """Generates initial interview questions based on resume and optional job description."""
+    """
+    Generates initial interview questions based on resume and optional job description.
+    Returns a list of questions on success, None on failure.
+    Prints errors/warnings to console.
+    """
     print(f"Generating {num_questions} initial questions using {model_name}...")
     if not resume_text:
-        messagebox.showerror("Generation Error", "Cannot generate questions without resume text.")
+        print(f"{ERROR_PREFIX}Cannot generate questions without resume text.")
+        # messagebox.showerror("Generation Error", ...) # REMOVED
         return None
     try:
         model = genai.GenerativeModel(model_name)
@@ -90,59 +114,71 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
 
         response = model.generate_content(prompt, safety_settings=safety_settings)
 
-        if response.parts:
-            generated_text = response.text.strip()
-            lines = generated_text.split('\n')
-            questions = []
-            for line in lines:
-                line_strip = line.strip()
-                if line_strip and line_strip[0].isdigit():
-                    first_char_index = -1
-                    for i, char in enumerate(line_strip):
-                        if not char.isdigit() and char not in ['.', ' ', ')']:
-                            first_char_index = i
-                            break
-                        elif char in ['.', ' ', ')']:
-                            continue
-                        else:
-                            continue
-                    if first_char_index != -1:
-                        questions.append(line_strip)
-                    else:
-                        print(f"Skipping malformed line: {line_strip}")
-
-            questions = questions[:num_questions]
-
-            if questions:
-                print(f"Successfully generated {len(questions)} initial questions.")
-                if len(questions) < num_questions:
-                    messagebox.showinfo("Generation Note", f"Model generated {len(questions)} initial questions (requested {num_questions}). This might happen if the input is short or the model couldn't find enough distinct points. Proceeding.")
-                return questions
-            else:
-                messagebox.showwarning("Generation Warning", "Model response for initial questions was empty or not in the expected numbered list format after parsing:\n\n" + generated_text)
-                return None
-        else:
-             feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A."
-             block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A." else "Unknown"
-             safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A." else "N/A"
+        # Handle potential blocks or empty responses
+        if not response.parts:
+             feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
+             block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
+             safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
              error_message = f"Received empty or blocked response for initial questions.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
-             messagebox.showerror("Generation Error", error_message)
-             print(f"Initial Questions Prompt Feedback: {feedback}")
-             return None
+             print(f"{ERROR_PREFIX}Initial Questions Generation: {error_message}")
+             # messagebox.showerror("Generation Error", error_message) # REMOVED
+             return None # Signal failure
+
+        # Process successful response
+        generated_text = response.text.strip()
+        lines = generated_text.split('\n')
+        questions = []
+        for line in lines:
+            line_strip = line.strip()
+            # Basic check for numbered list format
+            if line_strip and line_strip[0].isdigit():
+                # Simple parsing: find first non-digit, non-dot/space/paren char
+                first_char_index = -1
+                for i, char in enumerate(line_strip):
+                    if not char.isdigit() and char not in ['.', ' ', ')']:
+                        first_char_index = i
+                        break
+                if first_char_index != -1:
+                     # Add the whole stripped line (cleaning happens in UI)
+                     questions.append(line_strip)
+                else: # Malformed line (e.g., just "1.")
+                     print(f"Skipping malformed line during question parsing: {line_strip}")
+
+        # Limit to requested number, even if model gave more
+        questions = questions[:num_questions]
+
+        if questions:
+            print(f"Successfully generated {len(questions)} initial questions.")
+            if len(questions) < num_questions:
+                # This is just informational, not an error
+                print(f"Note: Model generated {len(questions)} initial questions (requested {num_questions}). This might happen if input is short or model couldn't find enough distinct points.")
+                # messagebox.showinfo("Generation Note", ...) # REMOVED
+            return questions
+        else:
+            # Model responded but parsing failed or gave empty list
+            print(f"Warning: Model response for initial questions was empty or not in the expected numbered list format after parsing:\n\n{generated_text}")
+            # messagebox.showwarning("Generation Warning", ...) # REMOVED
+            return None # Signal potential issue
+
     except Exception as e:
-        err_msg = f"Error generating initial questions with Gemini:\n{e}"
+        err_msg = f"Generating initial questions with Gemini: {e}"
         if "400" in str(e) and ("prompt" in str(e).lower() or "request payload" in str(e).lower() or "resource exhausted" in str(e).lower()):
-             err_msg += f"\n\nError 400 or Resource Exhausted: The combined text (Resume + Job Description) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs or a model with a larger context window if available."
-        messagebox.showerror("Generation Error", err_msg)
-        print(f"Exception during initial question generation: {e}")
+             err_msg += f"\n\n{ERROR_PREFIX}Error 400 or Resource Exhausted: The combined text (Resume + Job Description) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs or a model with a larger context window if available."
+        print(f"{ERROR_PREFIX}{err_msg}")
+        # messagebox.showerror("Generation Error", err_msg) # REMOVED
         return None
 
 def generate_follow_up_question(context_question, user_answer, conversation_history, model_name=MODEL_NAME):
-    """Generates a follow-up question based on the last answer and context."""
+    """
+    Generates a follow-up question based on the last answer and context.
+    Returns the follow-up question string, "[END TOPIC]", or None on error.
+    Prints errors to console.
+    """
     print(f"Generating follow-up question using {model_name}...")
     try:
         model = genai.GenerativeModel(model_name)
-        history_str = "\n".join([f"Q: {item['q'][:100]}...\nA: {item['a'][:150]}..." for item in conversation_history[-3:]])
+        # Limit history context sent to model
+        history_str = "\n".join([f"Q: {item['q'][:100]}...\nA: {item['a'][:150]}..." for item in conversation_history[-3:]]) # Send last 3 Q/A pairs (limited length)
         prompt = f"""
         You are an interviewer conducting a screening call.
         The original topic question was: "{context_question}"
@@ -170,53 +206,69 @@ def generate_follow_up_question(context_question, user_answer, conversation_hist
 
         response = model.generate_content(prompt, safety_settings=safety_settings)
 
-        if response.parts:
-            follow_up = response.text.strip()
-            print(f"Generated follow-up attempt: '{follow_up}'")
-            if follow_up:
-                 if follow_up == "[END TOPIC]":
-                     print("End topic signal received.")
-                     return None # Signal to end the topic
-                 if '?' not in follow_up and len(follow_up.split()) > 5:
-                     print("Warning: Generated follow-up might not be a question. Using it anyway.")
-                 elif len(follow_up.split()) < 3:
-                      print("Warning: Generated follow-up is very short. Using it anyway.")
-                 return follow_up
-            else:
-                 print("Received empty follow-up response, ending topic.")
-                 return None
-        else:
-            feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A."
-            block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A." else "Unknown"
-            print(f"Follow-up Generation Warning: Empty/blocked response. Reason: {block_reason}. Ending topic.")
-            return None
+        if not response.parts:
+            feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
+            block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
+            print(f"Warning: Follow-up Generation - Empty/blocked response. Reason: {block_reason}. Ending topic.")
+            return "[END TOPIC]" # Treat block as end of topic
+
+        follow_up = response.text.strip()
+        print(f"Generated follow-up attempt: '{follow_up}'")
+
+        if not follow_up:
+            print("Warning: Received empty follow-up response, ending topic.")
+            return "[END TOPIC]" # Treat empty as end
+
+        if follow_up == "[END TOPIC]":
+            print("End topic signal received.")
+            return "[END TOPIC]"
+
+        # Basic validation/warnings (optional)
+        if '?' not in follow_up and len(follow_up.split()) > 5:
+            print("Warning: Generated follow-up might not be a question. Using it anyway.")
+        elif len(follow_up.split()) < 3:
+             print("Warning: Generated follow-up is very short. Using it anyway.")
+
+        return follow_up # Return the generated question
+
     except Exception as e:
-        messagebox.showerror("Generation Error", f"Error generating follow-up question:\n{e}")
-        print(f"Exception during follow-up generation: {e}")
-        return None # End topic on error
+        print(f"{ERROR_PREFIX}Generating follow-up question: {e}")
+        # messagebox.showerror("Generation Error", ...) # REMOVED
+        # Return None to indicate an error occurred, distinct from "[END TOPIC]"
+        return None
 
 def generate_summary_review(full_history, model_name=MODEL_NAME):
-    """Generates a performance summary and review based on the interview transcript."""
+    """
+    Generates a performance summary and review based on the interview transcript.
+    Returns the summary string, or an error string starting with ERROR_PREFIX.
+    Prints errors to console.
+    """
     print(f"Generating interview summary and review using {model_name}...")
     if not full_history:
+        print("No interview history recorded for summary.")
         return "No interview history recorded."
     try:
         model = genai.GenerativeModel(model_name)
+
+        # Prepare transcript, limiting length to avoid exceeding model limits
         transcript_parts = []
         total_len = 0
+        # Limit context reasonably (e.g., ~15k chars, adjust as needed for model)
         max_len = 15000
         for item in reversed(full_history):
             q_part = f"Interviewer Q: {item['q']}\n"
             a_part = f"Candidate A: {item['a']}\n\n"
             item_len = len(q_part) + len(a_part)
             if total_len + item_len < max_len:
-                transcript_parts.append(a_part)
-                transcript_parts.append(q_part)
+                # Prepend to keep chronological order correct at the end
+                transcript_parts.insert(0, a_part)
+                transcript_parts.insert(0, q_part)
                 total_len += item_len
             else:
-                transcript_parts.append("[... earlier parts truncated ...]\n\n")
+                # Add truncation marker at the beginning
+                transcript_parts.insert(0, "[... earlier parts truncated ...]\n\n")
                 break
-        transcript = "".join(reversed(transcript_parts))
+        transcript = "".join(transcript_parts) # Already in correct order
 
         prompt = f"""
         Act as an objective hiring manager critically reviewing a candidate's screening interview performance based ONLY on the transcript below. Your goal is to assess their communication, clarity, and the substance of their answers in this specific conversation.
@@ -258,25 +310,31 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
 
         response = model.generate_content(prompt, safety_settings=safety_settings)
 
-        if response.parts:
-            print("Summary/review generated.")
-            return response.text.strip()
-        else:
-            feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A."
-            block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A." else "Unknown"
-            safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A." else "N/A"
+        if not response.parts:
+            feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
+            block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
+            safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
             error_message = f"Empty or blocked response for Summary/Review.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
-            messagebox.showerror("Review Generation Error", error_message)
-            print(f"Summary/Review Feedback: {feedback}")
-            return f"Error: Could not generate summary/review. {block_reason}"
+            print(f"{ERROR_PREFIX}Summary/Review Generation: {error_message}")
+            # messagebox.showerror("Review Generation Error", ...) # REMOVED
+            return f"{ERROR_PREFIX}Could not generate summary/review. Reason: {block_reason}"
+
+        print("Summary/review generated.")
+        return response.text.strip()
+
     except Exception as e:
-        error_message = f"Error generating summary/review:\n{e}"
-        messagebox.showerror("Review Generation Error", error_message)
-        print(f"Exception during summary/review: {e}")
-        return f"Error: Could not generate summary/review.\n{e}"
+        error_message = f"Generating summary/review: {e}"
+        print(f"{ERROR_PREFIX}{error_message}")
+        # messagebox.showerror("Review Generation Error", ...) # REMOVED
+        return f"{ERROR_PREFIX}Could not generate summary/review.\nDetails: {e}"
+
 
 def generate_qualification_assessment(resume_text, job_desc_text, full_history, model_name=MODEL_NAME):
-    """Generates an assessment of candidate qualifications against the job description, using resume and transcript."""
+    """
+    Generates an assessment of candidate qualifications against the job description.
+    Returns the assessment string, or an error string starting with ERROR_PREFIX.
+    Prints errors to console.
+    """
     print(f"Generating qualification assessment using {model_name}...")
     if not job_desc_text:
         print("No job description provided, skipping qualification assessment.")
@@ -287,22 +345,24 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
 
     try:
         model = genai.GenerativeModel(model_name)
+
+        # Prepare transcript, limiting length
         transcript_parts = []
         total_len = 0
-        max_len = 20000
+        max_len = 20000 # Allow slightly more context for assessment
         if full_history:
             for item in reversed(full_history):
                 q_part = f"Interviewer Q: {item['q']}\n"
                 a_part = f"Candidate A: {item['a']}\n\n"
                 item_len = len(q_part) + len(a_part)
                 if total_len + item_len < max_len:
-                    transcript_parts.append(a_part)
-                    transcript_parts.append(q_part)
+                    transcript_parts.insert(0, a_part)
+                    transcript_parts.insert(0, q_part)
                     total_len += item_len
                 else:
-                    transcript_parts.append("[... earlier parts truncated ...]\n\n")
+                    transcript_parts.insert(0, "[... earlier parts truncated ...]\n\n")
                     break
-            transcript = "".join(reversed(transcript_parts))
+            transcript = "".join(transcript_parts)
         else:
             transcript = "N/A (No interview conducted or history available)"
 
@@ -365,21 +425,22 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
 
         response = model.generate_content(prompt, safety_settings=safety_settings)
 
-        if response.parts:
-            print("Qualification assessment generated.")
-            return response.text.strip()
-        else:
-            feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A."
-            block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A." else "Unknown"
-            safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A." else "N/A"
+        if not response.parts:
+            feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
+            block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
+            safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
             error_message = f"Empty or blocked response for Qualification Assessment.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
-            messagebox.showerror("Assessment Error", error_message)
-            print(f"Assessment Feedback: {feedback}")
-            return f"Error: Could not generate assessment. {block_reason}"
+            print(f"{ERROR_PREFIX}Qualification Assessment Generation: {error_message}")
+            # messagebox.showerror("Assessment Error", ...) # REMOVED
+            return f"{ERROR_PREFIX}Could not generate assessment. Reason: {block_reason}"
+
+        print("Qualification assessment generated.")
+        return response.text.strip()
+
     except Exception as e:
-        err_msg = f"Error generating qualification assessment:\n{e}"
+        err_msg = f"Generating qualification assessment: {e}"
         if "400" in str(e) and ("prompt" in str(e).lower() or "request payload" in str(e).lower() or "resource exhausted" in str(e).lower()):
-             err_msg += f"\n\nError 400 or Resource Exhausted: The combined text (JD + Resume + Transcript) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs, fewer follow-ups, or a model with a larger context window if available."
-        messagebox.showerror("Assessment Error", err_msg)
-        print(f"Exception during qualification assessment: {e}")
-        return f"Error: Could not generate assessment.\n{e}"
+             err_msg += f"\n\n{ERROR_PREFIX}Error 400 or Resource Exhausted: The combined text (JD + Resume + Transcript) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs, fewer follow-ups, or a model with a larger context window if available."
+        print(f"{ERROR_PREFIX}{err_msg}")
+        # messagebox.showerror("Assessment Error", ...) # REMOVED
+        return f"{ERROR_PREFIX}Could not generate assessment.\nDetails: {e}"
