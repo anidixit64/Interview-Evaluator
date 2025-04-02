@@ -2,10 +2,10 @@
 # Handles core processing: Gemini API, PDF extraction, content generation.
 
 import os
+# REMOVED: from dotenv import load_dotenv
+import keyring # ADDED
 import google.generativeai as genai
 from PyPDF2 import PdfReader
-from dotenv import load_dotenv
-# REMOVED: from tkinter import messagebox
 import sys # For potentially exiting on critical config error
 
 # --- Default Configuration & Constants ---
@@ -19,26 +19,45 @@ MAX_FOLLOW_UPS_LIMIT = 5
 MODEL_NAME = "gemini-1.5-flash-latest"
 ERROR_PREFIX = "Error: " # Standard prefix for returning errors
 
+# --- Keyring Constants for Gemini --- ADDED SECTION ---
+KEYRING_SERVICE_NAME_GEMINI = "InterviewBotPro_Gemini"
+KEYRING_USERNAME_GEMINI = "gemini_api_key"
+# --- END Keyring Constants ---
+
 # --- Core Logic Functions ---
 
 def configure_gemini():
     """
-    Loads API key from .env and configures the Gemini client.
+    Loads Google API key from keyring and configures the Gemini client.
     Returns True on success, False on failure.
-    Prints errors to console. Exits if API key is missing.
+    Prints errors to console. Exits if API key is missing or keyring fails.
     """
-    load_dotenv()
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        # Critical error, print and exit is acceptable before UI starts
-        print(f"{ERROR_PREFIX}GOOGLE_API_KEY not found in .env file.\nPlease create a .env file in the same directory with your API key:\nGOOGLE_API_KEY=YOUR_API_KEY")
+    # REMOVED: load_dotenv()
+    api_key = None
+    try:
+        print(f"Attempting to retrieve Gemini API key from keyring (Service: '{KEYRING_SERVICE_NAME_GEMINI}')...") # MODIFIED message
+        api_key = keyring.get_password(KEYRING_SERVICE_NAME_GEMINI, KEYRING_USERNAME_GEMINI) # MODIFIED key retrieval
+        if not api_key:
+            # Critical error, print and exit is acceptable before UI starts
+            # MODIFIED error message
+            print(f"{ERROR_PREFIX}Gemini API key not found in keyring for service '{KEYRING_SERVICE_NAME_GEMINI}' and username '{KEYRING_USERNAME_GEMINI}'.")
+            print("Please store your key using your system's keyring.")
+            print("Example command: keyring set InterviewBotPro_Gemini gemini_api_key")
+            return False # Signal failure
+        print("Gemini API key retrieved from keyring.") # ADDED success message
+
+    except Exception as e:
+        print(f"{ERROR_PREFIX}Accessing keyring failed: {e}")
+        print("Ensure keyring is installed and a backend is available.")
         return False # Signal failure
+
+    # --- Configure Gemini using the retrieved key ---
     try:
         genai.configure(api_key=api_key)
         print("Gemini API configured successfully.")
         return True
     except Exception as e:
-        print(f"{ERROR_PREFIX}Configuring Gemini API: {e}")
+        print(f"{ERROR_PREFIX}Configuring Gemini API with retrieved key: {e}")
         return False
 
 def extract_text_from_pdf(pdf_path):

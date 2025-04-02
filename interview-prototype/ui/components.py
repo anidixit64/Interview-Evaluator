@@ -13,9 +13,11 @@ from PyQt6.QtGui import QIcon, QPixmap, QFont, QTextCursor, QColor, QPalette, QC
 from PyQt6.QtCore import Qt, QSize
 
 from core import logic # For default values, limits
+from core import tts   # <<<--- ADDED: Import tts to check availability
 
 # Helper function
 def _load_icon(icon_path_base, filename, size=None):
+    # ... (keep existing code) ...
     try:
         path = os.path.join(icon_path_base, filename)
         if not os.path.exists(path):
@@ -62,9 +64,11 @@ def create_setup_page(parent_window):
     config_group = QGroupBox("Configure Interview")
     config_group.setFont(parent_window.font_large_bold)
     config_layout = QHBoxLayout(config_group)
-    config_layout.setSpacing(25)
-    # Topics
+    config_layout.setSpacing(25) # Increased spacing a bit
+
+    # Topics Widget (Existing)
     topics_widget = QWidget()
+    # ... (keep existing topics layout code) ...
     topics_inner_layout = QHBoxLayout(topics_widget)
     topics_inner_layout.setContentsMargins(0,0,0,0)
     topics_inner_layout.setSpacing(5)
@@ -93,8 +97,10 @@ def create_setup_page(parent_window):
     topics_inner_layout.addWidget(parent_window.num_topics_label)
     topics_inner_layout.addWidget(parent_window.topic_plus_btn)
     config_layout.addWidget(topics_widget)
-    # Follow-ups
+
+    # Follow-ups Widget (Existing)
     followups_widget = QWidget()
+    # ... (keep existing follow-ups layout code) ...
     followups_inner_layout = QHBoxLayout(followups_widget)
     followups_inner_layout.setContentsMargins(0,0,0,0)
     followups_inner_layout.setSpacing(5)
@@ -123,15 +129,39 @@ def create_setup_page(parent_window):
     followups_inner_layout.addWidget(parent_window.max_follow_ups_label)
     followups_inner_layout.addWidget(parent_window.followup_plus_btn)
     config_layout.addWidget(followups_widget)
-    # Speech Input
-    parent_window.speech_checkbox = QCheckBox("Use Speech Input")
+
+    # --- MODIFIED: Add a separator for visual grouping ---
+    config_line = QFrame()
+    config_line.setFrameShape(QFrame.Shape.VLine)
+    config_line.setFrameShadow(QFrame.Shadow.Sunken)
+    config_layout.addWidget(config_line)
+    # ---------------------------------------------------
+
+    # Speech Input Checkbox (Existing)
+    parent_window.speech_checkbox = QCheckBox("Use Speech Input (STT)")
     parent_window.speech_checkbox.setFont(parent_window.font_default)
     parent_window.speech_checkbox.stateChanged.connect(parent_window.update_submit_button_text)
     config_layout.addWidget(parent_window.speech_checkbox)
+
+    # --- ADDED: OpenAI TTS Checkbox ---
+    parent_window.openai_tts_checkbox = QCheckBox("Use OpenAI TTS")
+    parent_window.openai_tts_checkbox.setFont(parent_window.font_default)
+    openai_available = "openai" in tts.get_potentially_available_providers()
+    if openai_available:
+        parent_window.openai_tts_checkbox.setToolTip("Use OpenAI for higher quality Text-to-Speech (requires API key in keyring).")
+        # Connect signal to handler in main_window.py
+        parent_window.openai_tts_checkbox.stateChanged.connect(parent_window._handle_openai_tts_change)
+    else:
+        parent_window.openai_tts_checkbox.setToolTip("OpenAI TTS unavailable (missing dependencies like openai, pydub, sounddevice, nltk, or keyring access failed). Check console.")
+        parent_window.openai_tts_checkbox.setEnabled(False)
+    config_layout.addWidget(parent_window.openai_tts_checkbox)
+    # --- END ADDED Checkbox ---
+
     config_layout.addStretch()
 
     # --- Job Description Section ---
     jd_group = QGroupBox("Job Description (Optional)")
+    # ... (keep existing jd layout code) ...
     jd_group.setFont(parent_window.font_large_bold)
     jd_layout = QVBoxLayout(jd_group)
     parent_window.job_desc_input = QTextEdit()
@@ -148,6 +178,7 @@ def create_setup_page(parent_window):
 
     # --- Start Button ---
     start_button_layout = QHBoxLayout()
+    # ... (keep existing start button code) ...
     parent_window.start_interview_btn = QPushButton("Next: Start Interview")
     if start_icon: parent_window.start_interview_btn.setIcon(start_icon)
     parent_window.start_interview_btn.setIconSize(parent_window.icon_size)
@@ -166,6 +197,7 @@ def create_setup_page(parent_window):
 
 # --- Page 2: Interview ---
 def create_interview_page(parent_window):
+    # ... (keep existing interview page code) ...
     page_widget = QWidget(parent_window)
     page_layout = QVBoxLayout(page_widget)
     page_layout.setContentsMargins(15, 15, 15, 15)
@@ -246,6 +278,7 @@ def create_interview_page(parent_window):
 
 # --- Page 3: Results ---
 def create_results_page(parent_window):
+    # ... (keep existing results page code) ...
     page_widget = QWidget(parent_window)
     page_layout = QVBoxLayout(page_widget)
     page_layout.setContentsMargins(15, 15, 15, 15)

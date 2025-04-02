@@ -1,113 +1,197 @@
 # core/tts.py
-# Handles Text-To-Speech (TTS) functions using Coqui TTS + afplay
+# Facade for Text-to-Speech, dispatching to selected provider.
 
-# --- Imports ---
-import threading
-import time
-import subprocess
-import tempfile
+import sys
 import os
-from TTS.api import TTS
+import importlib
+import subprocess # For fallback 'say'
 
-# --- Configuration ---
-# Select a Coqui TTS model. Examples:
-# - FastSpeech2 + HiFiGAN (Good quality): "tts_models/en/ljspeech/fastspeech2-hifigan"
-# - VITS (Often faster, good quality): "tts_models/en/ljspeech/vits"
-# - VITS (VCTK multi-speaker, might need speaker selection): "tts_models/en/vctk/vits"
-# Check available models: `tts --list_models`
-COQUI_MODEL_NAME = "tts_models/en/ljspeech/vits"
-COQUI_USE_GPU = False # Set to True if you have a compatible GPU and PyTorch installed with CUDA support
+# --- Provider Configuration ---
+SUPPORTED_PROVIDERS = ["gtts", "openai"]
+DEFAULT_PROVIDER = "gtts"
 
-# --- Initialize Coqui TTS Engine ---
-# Load the TTS model once when the module is imported for efficiency
-tts_engine = None
-try:
-    print(f"TTS Handler: Initializing Coqui TTS engine with model: {COQUI_MODEL_NAME}...")
-    # Make sure to install TTS: pip install TTS
-    tts_engine = TTS(model_name=COQUI_MODEL_NAME, progress_bar=False, gpu=COQUI_USE_GPU)
-    print("TTS Handler: Coqui TTS engine initialized successfully.")
-except ModuleNotFoundError:
-    print("TTS Handler Error: 'TTS' package not found. Please install it: pip install TTS")
-    print("TTS Handler: TTS functionality will be disabled.")
-except Exception as e:
-    print(f"TTS Handler Error: Failed to initialize Coqui TTS engine: {e}")
-    print("TTS Handler: TTS functionality will be disabled.")
-# --- End Coqui TTS Initialization ---
+# --- Dynamically Import Provider Modules ---
+tts_providers = {}
+# Keep track of providers whose basic dependencies were met
+potentially_available_providers = []
 
-
-# --- Text-To-Speech (TTS) Functions ---
-
-def speak_text(text_to_speak):
-    """
-    Generates speech using Coqui TTS and plays it using afplay.
-    Runs synthesis and playback in a separate thread.
-    Requires 'pip install TTS' and 'afplay' (macOS).
-    """
-    if not text_to_speak:
-        print("TTS Handler: No text provided to speak.")
-        return
-    if tts_engine is None:
-        print("TTS Handler Error: TTS engine not initialized. Cannot speak.")
-        return
-
-    # Start synthesis and playback in a background thread
-    thread = threading.Thread(target=_synthesize_and_play_coqui, args=(text_to_speak,), daemon=True)
-    thread.start()
-
-def _synthesize_and_play_coqui(text):
-    """
-    Internal function (run in a thread) to synthesize audio using Coqui TTS
-    and play it with afplay.
-    """
-    global tts_engine # Access the globally initialized engine
-    if tts_engine is None:
-        print("TTS Handler Error: Internal thread found TTS engine not initialized.")
-        return # Should not happen if speak_text checks, but good practice
-
-    temp_filename = None
+print("TTS Facade: Loading providers...")
+for provider_name in SUPPORTED_PROVIDERS:
     try:
-        # Create a temporary file to store the WAV output
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_f:
-            temp_filename = temp_f.name
+        module_name = f"core.tts_{provider_name}"
+        provider_module = importlib.import_module(module_name)
 
-        # Synthesize speech to the temporary file
-        print(f"TTS Handler: Synthesizing '{text[:30]}...' using Coqui TTS...")
-        start_time = time.time()
-        # Use the initialized tts_engine
-        tts_engine.tts_to_file(text=text, file_path=temp_filename)
-        end_time = time.time()
-        print(f"TTS Handler: Synthesis complete ({end_time - start_time:.2f}s). Playing audio...")
+        # --- MODIFIED CHECK ---
+        # Check if basic dependencies are met (static check)
+        if getattr(provider_module, 'dependencies_met', False):
+            tts_providers[provider_name] = provider_module
+            potentially_available_providers.append(provider_name) # Add to potentially available list
+            print(f"TTS Facade: Provider '{provider_name}' loaded (dependencies met).")
+        else:
+            print(f"TTS Facade: Provider '{provider_name}' unavailable (missing dependencies).")
+            # Ensure it's not added to tts_providers if deps aren't met
+            if provider_name in tts_providers:
+                 del tts_providers[provider_name]
+        # --- END MODIFIED CHECK ---
 
-        # Play the generated WAV file using afplay
+    except ImportError as e:
+        print(f"TTS Facade: Could not import provider module '{module_name}': {e}")
+    except Exception as e:
+        print(f"TTS Facade: Error loading provider '{provider_name}': {e}")
+
+# --- State ---
+_current_provider_name = None
+
+# --- Functions (set_provider, get_current_provider etc.) ---
+
+# Function to get runtime available providers (checks initialization status)
+def get_runtime_available_providers():
+    """Returns list of providers currently initialized or ready."""
+    runtime_available = []
+    for name in potentially_available_providers: # Check only those whose deps were met
+        provider_module = tts_providers.get(name)
+        if not provider_module: continue # Should not happen
+
+        # gTTS is available if deps were met
+        if name == 'gtts':
+             if getattr(provider_module, 'is_available', False): # Check its internal flag
+                 runtime_available.append(name)
+        # OpenAI is available only if initialized successfully
+        elif name == 'openai':
+             if getattr(provider_module, 'is_available', False) and getattr(provider_module, '_client_initialized', False):
+                 runtime_available.append(name)
+        # Add checks for other providers here if needed
+    return runtime_available
+
+def set_provider(provider_name):
+    """Sets the active TTS provider, attempting initialization if needed."""
+    global _current_provider_name
+    # Check against potentially available list first
+    if provider_name in potentially_available_providers:
+        provider_module = tts_providers.get(provider_name)
+        if not provider_module: return False # Should not happen
+
+        # Lazy init for OpenAI if selected and not already done
+        if provider_name == "openai":
+             if not getattr(provider_module, '_client_initialized', False):
+                 print(f"TTS Facade: Initializing '{provider_name}'...")
+                 if not provider_module.initialize_client():
+                     print(f"TTS Facade Warning: Failed to initialize '{provider_name}'.")
+                     # No need to remove from potentially_available_providers here
+                     # get_runtime_available_providers will filter it out
+                     _current_provider_name = None # Clear current if init fails
+                     return False # Indicate failure
+                 # If init succeeded, fall through to set provider
+
+        # If we reach here, provider is potentially available and initialized (if required)
+        _current_provider_name = provider_name
+        print(f"TTS Facade: Active provider set to '{_current_provider_name}'.")
+        return True
+
+    elif provider_name in SUPPORTED_PROVIDERS:
+         print(f"TTS Facade Error: Provider '{provider_name}' supported but dependencies not met.")
+         return False
+    else:
+        print(f"TTS Facade Error: Unknown provider '{provider_name}'.")
+        return False
+
+def get_current_provider():
+    """Gets the name of the currently active provider."""
+    return _current_provider_name
+
+# Use the potentially available list for cycling UI, runtime check happens on set/use
+def get_potentially_available_providers():
+    """Gets list of providers whose basic dependencies were met."""
+    return potentially_available_providers
+
+def get_next_provider(current_name):
+    """Cycles through providers whose dependencies were met."""
+    potential_list = get_potentially_available_providers()
+    if not potential_list: return None
+    if current_name not in potential_list: return potential_list[0]
+    try:
+        current_index = potential_list.index(current_name)
+        next_index = (current_index + 1) % len(potential_list)
+        return potential_list[next_index]
+    except Exception: return potential_list[0]
+
+def speak_text(text_to_speak, **kwargs):
+    """Generates speech using the currently selected TTS provider."""
+    global _current_provider_name
+    # Check if current provider is *runtime* available (initialized)
+    runtime_available = get_runtime_available_providers()
+
+    if not _current_provider_name or _current_provider_name not in runtime_available:
+        print(f"TTS Facade: Current provider '{_current_provider_name}' invalid/unavailable at runtime.")
+        new_provider_set = False
+        # Try setting default only if its deps were met initially
+        if DEFAULT_PROVIDER in potentially_available_providers:
+            print(f"TTS Facade: Trying default provider '{DEFAULT_PROVIDER}'.")
+            if set_provider(DEFAULT_PROVIDER): # This attempts init if needed
+                 # Check if it's now runtime available
+                 if _current_provider_name in get_runtime_available_providers():
+                     new_provider_set = True
+                 else: # Init failed for default
+                      _current_provider_name = None # Clear again
+        # Try first potential provider if default failed/unavailable
+        potential_list = get_potentially_available_providers()
+        if not new_provider_set and potential_list:
+             print(f"TTS Facade: Trying first potential provider '{potential_list[0]}'.")
+             if set_provider(potential_list[0]):
+                 if _current_provider_name in get_runtime_available_providers():
+                     new_provider_set = True
+                 else: # Init failed for first potential
+                      _current_provider_name = None
+
+        if not _current_provider_name: # Check again after trying defaults
+            fallback_say(text_to_speak, "No TTS provider is available or could be initialized.")
+            return
+
+    # Dispatch to the current provider's speak_text function
+    if _current_provider_name in tts_providers:
+        provider_module = tts_providers[_current_provider_name]
         try:
-            # Use subprocess.run for cleaner execution and error handling
-            process = subprocess.run(['afplay', temp_filename],
-                                     check=True, # Raise CalledProcessError on failure
-                                     capture_output=True, # Capture stdout/stderr
-                                     timeout=60) # Add a timeout
-            # print(f"TTS Handler: afplay finished for '{text[:20]}...'. Output: {process.stdout.decode()}") # Optional stdout log
-            print(f"TTS Handler: afplay finished for '{text[:20]}...'.")
-        except FileNotFoundError:
-             print("TTS Handler Error: 'afplay' command not found. Please ensure it's installed (macOS).")
-        except subprocess.CalledProcessError as cpe:
-             # Use stderr for potentially more informative errors from afplay
-             error_message = cpe.stderr.decode().strip() if cpe.stderr else f"Return code {cpe.returncode}"
-             print(f"TTS Handler Error: 'afplay' failed: {error_message}")
-        except subprocess.TimeoutExpired:
-             print(f"TTS Handler Error: 'afplay' timed out playing audio for '{text[:20]}...'.")
-        except Exception as play_err:
-             print(f"TTS Handler Error: Unexpected error during afplay: {play_err}")
+            # Check again if it's runtime available right before call
+            if _current_provider_name not in get_runtime_available_providers():
+                 raise RuntimeError(f"Provider '{_current_provider_name}' became unavailable before speech call.")
+            # Check if the specific provider module has the stop_playback function before calling it
+            if hasattr(provider_module, 'stop_playback'):
+                provider_module.stop_playback()
+            provider_module.speak_text(text_to_speak, **kwargs)
+        except AttributeError:
+            fallback_say(text_to_speak, f"Provider '{_current_provider_name}' misconfigured (no speak_text/stop_playback).")
+        except Exception as e:
+            print(f"TTS Facade Error calling '{_current_provider_name}': {e}")
+            fallback_say(text_to_speak, f"Error during speech with '{_current_provider_name}'.")
+    else:
+        fallback_say(text_to_speak, f"Selected provider '{_current_provider_name}' not loaded.")
 
-    except Exception as synth_err:
-        # Catch potential errors during TTS synthesis
-        print(f"TTS Handler Error (Coqui): Failed to synthesize audio: {synth_err}")
-    finally:
-        # Clean up the temporary file
-        if temp_filename and os.path.exists(temp_filename):
-            try:
-                os.remove(temp_filename)
-                # print(f"TTS Handler: Deleted temp file {temp_filename}")
-            except Exception as del_err:
-                print(f"TTS Handler Warning: Failed to delete temp file {temp_filename}: {del_err}")
+# --- fallback_say remains the same ---
+def fallback_say(text, reason):
+    # ... (original minimal code) ...
+    print(f"TTS Facade: {reason}"); print("TTS Facade: Attempting system 'say' command fallback...")
+    try:
+        cmd = None
+        if sys.platform == 'darwin': cmd = ['say', text]
+        elif sys.platform == 'win32': print("TTS Facade: System 'say' fallback not directly supported on Windows."); return
+        elif 'linux' in sys.platform:
+            import shutil
+            if shutil.which('spd-say'): cmd = ['spd-say', '--wait', text]
+            elif shutil.which('espeak'): cmd = ['espeak', text]
+            else: print("TTS Facade: No Linux TTS command found (spd-say, espeak)."); return
+        if cmd: subprocess.run(cmd, check=True, timeout=30, capture_output=True); print("TTS Facade: System 'say' command executed.")
+    except FileNotFoundError: print(f"TTS Facade Error: System TTS command not found.")
+    except subprocess.TimeoutExpired: print("TTS Facade Error: System 'say' command timed out.")
+    except Exception as say_e: print(f"TTS Facade Error: System 'say' command failed: {say_e}")
 
-# --- End TTS Functions ---
+# --- Initialization ---
+# Set initial provider based on potential availability
+initial_provider = DEFAULT_PROVIDER if DEFAULT_PROVIDER in potentially_available_providers else (potentially_available_providers[0] if potentially_available_providers else None)
+if initial_provider:
+    print(f"TTS Facade: Setting initial provider to '{initial_provider}' (initialization may be deferred)...")
+    # We only set the name here; init happens on first use or explicit set
+    _current_provider_name = initial_provider
+    # Don't call set_provider here to avoid premature initialization
+else:
+    print("TTS Facade Warning: No TTS providers potentially available on startup.")
+    _current_provider_name = None

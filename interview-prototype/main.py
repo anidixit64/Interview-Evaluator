@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt
 # --- Project Imports ---
 from core import logic
 from core import recording # Import recording module
-from core import tts       # Import tts module
+from core import tts       # Import tts module (NEW Facade)
 # MODIFIED: Import the constant
 from core.recording import RECORDINGS_DIR
 from ui.main_window import InterviewApp
@@ -72,14 +72,16 @@ if __name__ == "__main__":
     # Initial checks...
     if not os.path.exists(ICON_PATH): print(f"Warning: Icon folder '{ICON_PATH}' not found.")
 
-    # Configure Gemini first (critical)
+    # Configure Gemini first (critical) - Uses keyring now
     if not logic.configure_gemini():
+        # Initialize QApplication temporarily just to show the critical message box
         temp_app = QApplication.instance()
         if temp_app is None: temp_app = QApplication(sys.argv)
         QMessageBox.critical(None, "Fatal Error",
-                             "Failed to configure Gemini API.\n"
-                             "Please ensure GOOGLE_API_KEY is set correctly in a .env file.\n"
-                             "Application will now exit.")
+                             "Failed to configure Gemini API.\n" # MODIFIED Message
+                             "Please ensure the API key is stored correctly in your system's keyring\n"
+                             f"(Service: '{logic.KEYRING_SERVICE_NAME_GEMINI}', Username: '{logic.KEYRING_USERNAME_GEMINI}').\n"
+                             "Check console output for details. Application will now exit.")
         sys.exit(1)
 
     # Create the main application instance
@@ -95,11 +97,11 @@ if __name__ == "__main__":
         q_app.setStyleSheet(style_sheet_content)
     # ------------------------------------
 
-    # Check for .env file *after* QApplication is initialized for the warning box
-    if not os.path.exists(".env"):
-         QMessageBox.warning(None, "Configuration Warning",
-                             f"'.env' file not found in the project directory.\n"
-                             "Make sure it exists and contains your GOOGLE_API_KEY.")
+    # --- REMOVED .env check ---
+    # if not os.path.exists(".env"):
+    #      QMessageBox.warning(None, "Configuration Warning",
+    #                          f"'.env' file not found in the project directory.\n"
+    #                          "Make sure it exists and contains your GOOGLE_API_KEY.")
 
     # --- Microphone Check ---
     # (Mic check logic remains the same)
