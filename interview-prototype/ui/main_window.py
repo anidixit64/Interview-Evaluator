@@ -4,6 +4,7 @@ import sys
 import queue
 import platform # For opening folder
 import subprocess # For opening folder fallback
+import html # For escaping history text
 
 # --- PyQt6 Imports ---
 from PyQt6.QtWidgets import (
@@ -15,10 +16,9 @@ from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QUrl
 
 # --- Project Imports ---
 import core.logic as logic
-# MODIFIED: Import specific modules instead of the old handler
-from core import tts # <<<--- Now imports the NEW TTS facade
+from core import tts # NEW TTS facade
 from core import recording
-# MODIFIED: Import the constant from the correct new module
+# RECORDINGS_DIR is now the absolute user path from core.recording
 from core.recording import RECORDINGS_DIR
 
 # Import UI component creation functions
@@ -32,33 +32,33 @@ class InterviewApp(QWidget):
     INTERVIEW_PAGE_INDEX = 1
     RESULTS_PAGE_INDEX = 2
 
+    # Use the icon_path passed during initialization
     def __init__(self, icon_path, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.icon_path = icon_path
+        self.icon_path = icon_path # Store the resolved path
         self.setWindowTitle("Interview Bot Pro")
-        self.setGeometry(100, 100, 850, 1000) # Adjusted default width slightly
+        self.setGeometry(100, 100, 850, 1000)
 
         self._setup_appearance()
-        self._load_assets() # Load only icons needed directly here
+        self._load_assets() # Assets now mostly loaded in components
         self._init_state()
-        self._setup_ui()   # Now sets up QStackedWidget
-        self._update_ui_from_state() # Set initial UI state based on variables
-        self._update_progress_indicator() # Set initial progress text
+        self._setup_ui()
+        self._update_ui_from_state()
+        self._update_progress_indicator()
         self.stt_timer = QTimer(self)
         self.stt_timer.timeout.connect(self.check_stt_queue)
         self.stt_timer.start(100)
 
 
     def _setup_appearance(self):
-        # ... (keep existing appearance code) ...
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
         palette.setColor(QPalette.ColorRole.WindowText, QColor(220, 220, 220))
         palette.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
         palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
         palette.setColor(QPalette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
-        palette.setColor(QPalette.ColorRole.ToolTipText, Qt.GlobalColor.white)
+        palette.setColor(QPalette.ColorRole.ToolTipText, QColor(50,50,50)) # Darker tooltip text
         palette.setColor(QPalette.ColorRole.Text, QColor(220, 220, 220))
         palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
         palette.setColor(QPalette.ColorRole.ButtonText, QColor(220, 220, 220))
@@ -74,13 +74,10 @@ class InterviewApp(QWidget):
         QApplication.setStyle("Fusion")
 
 
-    def _load_assets(self): # Load only common/needed icons here
-        # ... (keep existing asset loading code) ...
+    def _load_assets(self):
+        # Most icons loaded in components using self.icon_path
+        # Keep sizes and fonts here
         self.icon_size = QSize(20, 20)
-        self.submit_icon = self._load_icon_internal("send.png", self.icon_size)
-        self.record_icon = self._load_icon_internal("mic_black_36dp.png", self.icon_size)
-        self.listening_icon = self._load_icon_internal("record_wave.png", self.icon_size)
-        self.processing_icon = self._load_icon_internal("spinner.png", self.icon_size)
         # Fonts
         self.font_default = QFont("Arial", 10)
         self.font_bold = QFont("Arial", 10, QFont.Weight.Bold)
@@ -88,8 +85,8 @@ class InterviewApp(QWidget):
         self.font_large_bold = QFont("Arial", 12, QFont.Weight.Bold)
         self.font_history = QFont("Monospace", 9)
 
+
     def _init_state(self): # (Add new widget refs)
-        # --- ORIGINAL INIT STATE CODE ---
         self.pdf_filepath = None
         self.resume_content = ""
         self.job_description_text = ""
@@ -103,7 +100,7 @@ class InterviewApp(QWidget):
         self.follow_up_count = 0
         self.current_full_interview_history = []
         self.use_speech_input = False
-        self.use_openai_tts = False  # <<<--- ADDED: State for OpenAI TTS checkbox
+        self.use_openai_tts = False  # State for OpenAI TTS checkbox
         self.is_recording = False
         self.last_question_asked = ""
         # Widget refs - set by components.py
@@ -117,7 +114,7 @@ class InterviewApp(QWidget):
         self.followup_plus_btn=None
         self.max_follow_ups_label=None
         self.speech_checkbox=None
-        self.openai_tts_checkbox=None # <<<--- ADDED: Widget ref for OpenAI TTS checkbox
+        self.openai_tts_checkbox=None # Widget ref for OpenAI TTS checkbox
         self.start_interview_btn=None
         self.current_q_text=None
         self.answer_input=None
@@ -131,10 +128,9 @@ class InterviewApp(QWidget):
         # New UI elements
         self.progress_indicator_label = None
         self.status_bar_label = None
-        # --- END ORIGINAL INIT STATE CODE ---
+
 
     def _setup_ui(self): # Setup Stack + Status/Progress
-        # ... (keep existing setup UI code) ...
         main_window_layout = QVBoxLayout(self)
         main_window_layout.setContentsMargins(0,0,0,0)
         main_window_layout.setSpacing(0)
@@ -156,7 +152,7 @@ class InterviewApp(QWidget):
         self.stacked_widget = QStackedWidget()
         main_window_layout.addWidget(self.stacked_widget, stretch=1)
 
-        # --- Create Pages ---
+        # Create Pages (passes self, which includes resolved icon_path)
         self.setup_page = create_setup_page(self)
         self.interview_page = create_interview_page(self)
         self.results_page = create_results_page(self)
@@ -173,8 +169,8 @@ class InterviewApp(QWidget):
 
         self.setLayout(main_window_layout)
 
+
     def _update_ui_from_state(self): # Update setup page state
-        # --- ORIGINAL UPDATE UI FROM STATE CODE ---
         print("Updating UI from state...")
         pdf_loaded = bool(self.pdf_filepath)
 
@@ -183,22 +179,24 @@ class InterviewApp(QWidget):
             self.file_label.setText(os.path.basename(self.pdf_filepath) if pdf_loaded else "No resume selected.")
         if hasattr(self, 'job_desc_input') and self.job_desc_input:
             self.job_desc_input.setPlainText(self.job_description_text)
-            # self.job_desc_input.setEnabled(pdf_loaded) # Moved to set_setup_controls_state
         if hasattr(self, 'num_topics_label') and self.num_topics_label:
             self.num_topics_label.setText(str(self.num_topics))
         if hasattr(self, 'max_follow_ups_label') and self.max_follow_ups_label:
             self.max_follow_ups_label.setText(str(self.max_follow_ups))
         if hasattr(self, 'speech_checkbox') and self.speech_checkbox:
             self.speech_checkbox.setChecked(self.use_speech_input)
-        # --- ADDED: Update OpenAI TTS checkbox ---
+
+        # --- Update OpenAI TTS checkbox ---
         if hasattr(self, 'openai_tts_checkbox') and self.openai_tts_checkbox:
-             # Disable signal blocking temporarily to set state without triggering handler
              self.openai_tts_checkbox.blockSignals(True)
              self.openai_tts_checkbox.setChecked(self.use_openai_tts)
+             # Ensure enabled state matches dependencies & PDF loaded state
+             openai_deps_met = "openai" in tts.get_potentially_available_providers()
+             self.openai_tts_checkbox.setEnabled(pdf_loaded and openai_deps_met)
              self.openai_tts_checkbox.blockSignals(False)
         # --- END ADDED ---
 
-        # Update enabled state of setup controls
+        # Update enabled state of setup controls (relies on set_setup_controls_state)
         self.set_setup_controls_state(pdf_loaded)
         if hasattr(self, 'select_btn') and self.select_btn:
              self.select_btn.setEnabled(True) # Select always enabled initially
@@ -214,11 +212,10 @@ class InterviewApp(QWidget):
         self.update_status("Ready.")
         # Set initial page (usually setup after reset)
         self.stacked_widget.setCurrentIndex(self.SETUP_PAGE_INDEX)
-        # --- END ORIGINAL UPDATE UI FROM STATE CODE ---
+
 
     # --- Navigation/Progress ---
     def _update_progress_indicator(self):
-        # ... (keep existing progress indicator code) ...
         if not hasattr(self, 'progress_indicator_label') or not self.progress_indicator_label:
              return
         current_index = self.stacked_widget.currentIndex()
@@ -226,23 +223,21 @@ class InterviewApp(QWidget):
         progress_parts = []
         for i, step in enumerate(steps):
             if i == current_index:
-                # Wrap the bold tag with a font tag for color
                 progress_parts.append(f'<font color="orange"><b>{step}</b></font>')
             else:
                 progress_parts.append(step)
-        # Join with HTML arrow entity
         progress_text = " → ".join(progress_parts)
         self.progress_indicator_label.setText(progress_text)
 
+
     def _go_to_setup_page(self):
-        # ... (keep existing go to setup code) ...
         print("Navigating to Setup Page and Resetting...")
         self.reset_interview_state(clear_config=True) # Full reset
         self.stacked_widget.setCurrentIndex(self.SETUP_PAGE_INDEX)
         self._update_progress_indicator()
 
+
     def _go_to_interview_page(self):
-        # ... (keep existing go to interview code) ...
         print("Navigating to Interview Page...")
         if hasattr(self, 'current_q_text'): self.current_q_text.clear()
         if hasattr(self, 'answer_input'): self.answer_input.clear()
@@ -251,8 +246,8 @@ class InterviewApp(QWidget):
         self._update_progress_indicator()
         self.update_status("Interview started. Waiting for question...")
 
+
     def _go_to_results_page(self, summary, assessment):
-        # ... (keep existing go to results code) ...
         print("Navigating to Results Page...")
         if hasattr(self, 'summary_text_results') and self.summary_text_results:
             self.summary_text_results.setMarkdown(summary or "*Summary generation failed or N/A*")
@@ -262,18 +257,23 @@ class InterviewApp(QWidget):
         self._update_progress_indicator()
         self.update_status("Interview complete. Results displayed.")
 
+
     # --- Helpers & State Updates ---
     def _load_icon_internal(self, filename, size=None):
-        # ... (keep existing icon loading code) ...
+        # This method is now less used, components.py handles most loading
+        # It uses self.icon_path which should be resolved
         try:
-            path = os.path.join(self.icon_path, filename)
-            return QIcon(path) if os.path.exists(path) else None
+            path = os.path.join(self.icon_path, filename) # Use resolved base path
+            if not os.path.exists(path):
+                 print(f"Icon Load Warning (Internal): Icon not found at {path}")
+                 return None
+            return QIcon(path)
         except Exception as e:
-            print(f"Icon error {filename}: {e}")
+            print(f"Icon Load Error (Internal) {filename}: {e}")
             return None
 
+
     def show_message_box(self, level, title, message):
-        # ... (keep existing message box code) ...
         box = QMessageBox(self)
         icon_map = {"info": QMessageBox.Icon.Information, "warning": QMessageBox.Icon.Warning, "error": QMessageBox.Icon.Critical}
         box.setIcon(icon_map.get(level, QMessageBox.Icon.NoIcon))
@@ -282,8 +282,8 @@ class InterviewApp(QWidget):
         box.setStandardButtons(QMessageBox.StandardButton.Ok)
         box.exec()
 
+
     def _adjust_value(self, value_type, amount):
-        # ... (keep existing adjust value code) ...
         current_val, min_val, max_val, target_label, target_var_name = 0, 0, 0, None, ""
         if value_type == 'topics':
             current_val, min_val, max_val, target_label, target_var_name = self.num_topics, logic.MIN_TOPICS, logic.MAX_TOPICS, self.num_topics_label, 'num_topics'
@@ -299,8 +299,8 @@ class InterviewApp(QWidget):
         else:
             print(f"Value {new_value} out of bounds ({min_val}-{max_val})")
 
+
     def update_status(self, message, busy=False): # Update Status Bar
-        # ... (keep existing update status code) ...
         if self.status_bar_label:
             self.status_bar_label.setText(message)
         if busy:
@@ -309,72 +309,82 @@ class InterviewApp(QWidget):
             QApplication.restoreOverrideCursor()
         QApplication.processEvents()
 
+
     def display_question(self, question_text): # Sets last_question_asked
-        # --- ORIGINAL DISPLAY QUESTION CODE (MODIFIED TTS CALL) ---
         self.last_question_asked = question_text
         if hasattr(self, 'current_q_text') and self.current_q_text:
             self.current_q_text.setPlainText(question_text)
         else:
             self.update_status(f"Asking: {question_text[:30]}...")
-
-        # <<<--- TTS CALL REMAINS THE SAME --->>>
-        # The tts facade handles the currently selected provider
         try:
-            tts.speak_text(question_text)
+            tts.speak_text(question_text) # Facade handles current provider
         except Exception as e:
-            print(f"TTS Error during speak_text call: {e}") # Log error from facade call
-
+            print(f"TTS Error during speak_text call: {e}")
         self.enable_interview_controls()
         if hasattr(self, 'answer_input') and self.answer_input and not self.use_speech_input:
             self.answer_input.setFocus()
-        # --- END ORIGINAL DISPLAY QUESTION CODE (MODIFIED TTS CALL) ---
+
 
     def add_to_history(self, text, tag=None): # Add to Transcript view
-        # ... (keep existing add to history code) ...
+        # --- MODIFIED to use palette colors and escape text ---
         if not hasattr(self, 'history_text') or not self.history_text:
             return
         cursor = self.history_text.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.history_text.setTextCursor(cursor)
+
+        text_color_name = self.palette().color(QPalette.ColorRole.Text).name()
+        # Escape HTML special characters and replace newlines with <br> for display
+        escaped_text = html.escape(text).replace("\n", "<br>")
+
+        html_content = ""
         if tag == "question_style":
-            self.history_text.insertHtml(f'<font color="#569CD6">{text}</font>')
+            # Question style uses a specific blue color
+            html_content = f'<font color="#569CD6">{escaped_text}</font>'
         elif tag == "answer_style":
-            # Use the current palette's text color dynamically
-            text_color_name = self.palette().color(QPalette.ColorRole.Text).name()
-            self.history_text.insertHtml(f'<font color="{text_color_name}">{text}</font>')
+            # Answer style uses the standard text color
+            html_content = f'<font color="{text_color_name}">{escaped_text}</font>'
         elif tag == "topic_marker":
-            self.history_text.insertHtml(f'<font color="grey"><b>{text}</b></font>')
-        else: # Default plain text
-            # Ensure default text uses the standard text color from the palette
-            text_color_name = self.palette().color(QPalette.ColorRole.Text).name()
-            # Escape HTML characters in plain text before inserting to avoid issues
-            import html
-            escaped_text = html.escape(text).replace("\n", "<br>") # Also handle newlines
-            self.history_text.insertHtml(f'<font color="{text_color_name}">{escaped_text}</font>')
+            # Topic marker uses grey and bold
+            html_content = f'<font color="grey"><b>{escaped_text}</b></font>'
+        else:
+            # Default plain text uses the standard text color
+            html_content = f'<font color="{text_color_name}">{escaped_text}</font>'
 
+        self.history_text.insertHtml(html_content)
         self.history_text.ensureCursorVisible()
-
-
-    def set_setup_controls_state(self, enabled): # Enable/Disable Setup Page Controls
-        # --- MODIFIED: Add openai_tts_checkbox ---
-        pdf_needed_controls = [
-            self.job_desc_input, self.topic_minus_btn, self.topic_plus_btn, self.num_topics_label,
-            self.followup_minus_btn, self.followup_plus_btn, self.max_follow_ups_label,
-            self.speech_checkbox, self.start_interview_btn,
-            self.openai_tts_checkbox # <<<--- ADDED
-        ]
-        for widget in pdf_needed_controls:
-            if widget: # Check if widget object exists
-                # Special case for openai checkbox: only enable if deps met AND pdf loaded
-                if widget == self.openai_tts_checkbox:
-                    openai_deps_met = "openai" in tts.get_potentially_available_providers()
-                    widget.setEnabled(enabled and openai_deps_met)
-                else:
-                    widget.setEnabled(enabled)
         # --- END MODIFICATION ---
 
+
+    def set_setup_controls_state(self, pdf_loaded): # Enable/Disable Setup Page Controls
+        # --- MODIFIED: Correctly handle openai_tts_checkbox enabling ---
+        controls_to_manage = [
+            (self.job_desc_input, True),
+            (self.topic_minus_btn, True), (self.topic_plus_btn, True), (self.num_topics_label, True),
+            (self.followup_minus_btn, True), (self.followup_plus_btn, True), (self.max_follow_ups_label, True),
+            (self.speech_checkbox, True),
+            (self.start_interview_btn, True),
+            (self.openai_tts_checkbox, False) # Special handling below
+        ]
+
+        openai_deps_met = "openai" in tts.get_potentially_available_providers()
+
+        for widget, is_always_pdf_dependent in controls_to_manage:
+            if widget: # Check if widget object exists
+                should_enable = pdf_loaded
+
+                # Special case for openai checkbox: requires deps AND PDF loaded
+                if widget == self.openai_tts_checkbox:
+                    should_enable = pdf_loaded and openai_deps_met
+                # For others, just depends on pdf_loaded status
+                elif not is_always_pdf_dependent:
+                     pass # Widgets not solely dependent on PDF (like select_btn) are handled elsewhere
+
+                widget.setEnabled(should_enable)
+        # --- END MODIFICATION ---
+
+
     def enable_interview_controls(self): # Enable Interview Page Controls
-        # ... (keep existing enable interview controls code) ...
         if not hasattr(self, 'answer_input') or not hasattr(self, 'submit_button'):
             return
         text_input_enabled = not self.use_speech_input
@@ -384,8 +394,8 @@ class InterviewApp(QWidget):
         self.is_recording = False
         self.set_recording_button_state('idle')
 
+
     def disable_interview_controls(self, is_recording_stt=False): # Disable Interview Page Controls
-        # ... (keep existing disable interview controls code) ...
         if not hasattr(self, 'answer_input') or not hasattr(self, 'submit_button'):
             return
         self.answer_input.setReadOnly(True)
@@ -395,7 +405,6 @@ class InterviewApp(QWidget):
 
 
     def reset_interview_state(self, clear_config=True): # Reset state and UI
-        # --- MODIFIED: Reset use_openai_tts ---
         print(f"Resetting interview state (clear_config={clear_config})...")
         if clear_config:
             self.pdf_filepath = None
@@ -404,13 +413,22 @@ class InterviewApp(QWidget):
             self.num_topics = logic.DEFAULT_NUM_TOPICS
             self.max_follow_ups = logic.DEFAULT_MAX_FOLLOW_UPS
             self.use_speech_input = False
-            self.use_openai_tts = False # <<<--- ADDED Reset
+            self.use_openai_tts = False # Reset OpenAI flag
             # Set default TTS provider on full reset
-            if not tts.set_provider(tts.DEFAULT_PROVIDER):
-                 # Attempt fallback if default failed
-                 potential = tts.get_potentially_available_providers()
-                 if potential: tts.set_provider(potential[0])
+            current_provider = tts.get_current_provider()
+            default_provider = tts.DEFAULT_PROVIDER
+            print(f"Resetting TTS. Current: {current_provider}, Default: {default_provider}")
+            if current_provider != default_provider:
+                if not tts.set_provider(default_provider):
+                    potential = tts.get_potentially_available_providers()
+                    if potential and tts.set_provider(potential[0]):
+                        print(f"Reset TTS: Set to first available '{potential[0]}'.")
+                    else:
+                         print("Reset TTS: ERROR - Could not set default or fallback.")
+                else:
+                     print(f"Reset TTS: Set to default '{default_provider}'.")
 
+        # Reset dynamic state
         self.initial_questions = []
         self.cleaned_initial_questions = set()
         self.current_initial_q_index = -1
@@ -420,17 +438,18 @@ class InterviewApp(QWidget):
         self.current_full_interview_history = []
         self.is_recording = False
         self.last_question_asked = ""
-        self._update_ui_from_state() # Update UI based on reset values
+
+        # Update UI based on reset values (this will update checkbox states)
+        self._update_ui_from_state()
+        # Ensure interview controls are disabled after reset
         self.disable_interview_controls()
         QApplication.restoreOverrideCursor()
         print("Interview state reset complete.")
-        # --- END MODIFICATION ---
+
 
     def _clean_question_text(self, raw_q_text):
-        # ... (keep existing clean question text code) ...
         cleaned = raw_q_text.strip()
         if cleaned and cleaned[0].isdigit():
-            # Handle "1.", "1)", "1 " prefixes
             parts = cleaned.split('.', 1)
             if len(parts) > 1 and parts[0].isdigit(): return parts[1].strip()
             parts = cleaned.split(')', 1)
@@ -439,52 +458,54 @@ class InterviewApp(QWidget):
             if len(parts) > 1 and parts[0].isdigit(): return parts[1].strip()
         return cleaned
 
+
     def save_transcript_to_file(self):
-        # ... (keep existing save transcript code) ...
-        if not self.current_full_interview_history: print("No history to save."); return
-        if not self.cleaned_initial_questions: print("Warning: Cleaned Qs missing during transcript save..."); # return # Maybe don't return, just warn?
+        # Use the absolute RECORDINGS_DIR path
+        if not self.current_full_interview_history:
+            print("No history to save.")
+            return
+        if not self.initial_questions: # Check if initial questions exist for mapping
+            print("Warning: Initial questions missing, cannot accurately map topics in transcript.")
+            # Proceed without topic mapping? Or return? Let's proceed but it will be less structured.
+            topic_index_map = {}
+        else:
+            topic_index_map = {self._clean_question_text(q): i for i, q in enumerate(self.initial_questions)}
 
         transcript_lines = []
-        current_topic_num = 0
-        current_follow_up_num = 0
-        initial_q_list = list(self.cleaned_initial_questions) # For index lookup (if needed, though logic below is different)
+        last_topic_num = -1
 
         try:
-            # Simpler loop structure
-            topic_index_map = {self._clean_question_text(q): i for i, q in enumerate(self.initial_questions)}
-            last_topic_num = -1
-
             for qa_pair in self.current_full_interview_history:
-                q_raw = qa_pair.get('q', 'N/A')
-                a = qa_pair.get('a', 'N/A')
-                q_clean = self._clean_question_text(q_raw) # Clean question for matching
+                 q_raw = qa_pair.get('q', 'N/A')
+                 a = qa_pair.get('a', 'N/A')
+                 q_clean = self._clean_question_text(q_raw)
+                 topic_index = topic_index_map.get(q_clean, -1)
 
-                topic_index = topic_index_map.get(q_clean, -1)
-
-                if topic_index != -1: # Found an initial question
+                 if topic_index != -1: # Found an initial question
                     current_topic_num = topic_index + 1
-                    current_follow_up_num = 0 # Reset follow-up count for new topic
                     if current_topic_num != last_topic_num and last_topic_num != -1:
                         transcript_lines.append("\n-------------------------") # Separator between topics
                     transcript_lines.append(f"\nQuestion {current_topic_num}: {q_raw}\nAnswer: {a}")
                     last_topic_num = current_topic_num
-                else: # This is a follow-up question
-                    current_follow_up_num += 1
+                 else: # This is a follow-up question
                     # Determine context based on last known topic number
-                    ctx = f"Topic {last_topic_num}" if last_topic_num > 0 else "Initial"
-                    transcript_lines.append(f"\nFollow Up {current_follow_up_num} (re {ctx}): {q_raw}\nAnswer: {a}")
+                    ctx = f"Topic {last_topic_num}" if last_topic_num > 0 else "General"
+                    # Find the previous question index to number follow-ups correctly
+                    follow_up_num = sum(1 for item in self.current_full_interview_history[:self.current_full_interview_history.index(qa_pair)+1]
+                                        if topic_index_map.get(self._clean_question_text(item['q']), -1) == -1) # Count follow-ups up to this point
 
-                # transcript_lines.append("") # Blank line after Q/A pair - removed, added \n above
+                    transcript_lines.append(f"\nFollow Up (re {ctx}): {q_raw}\nAnswer: {a}")
 
-            # Use the imported RECORDINGS_DIR constant
-            os.makedirs(RECORDINGS_DIR, exist_ok=True)
-            filepath = os.path.join(RECORDINGS_DIR, "transcript.txt")
+
+            # Ensure user-specific directory exists
+            os.makedirs(RECORDINGS_DIR, exist_ok=True) # Use absolute path
+
+            filepath = os.path.join(RECORDINGS_DIR, "transcript.txt") # Use absolute path
             print(f"Saving transcript to {filepath}...")
-            # Ensure final newline for cleaner diffs
-            # Join with single newline, start with newline if needed
+            # Join lines, ensuring they are stripped and filter empty ones
             final_transcript = "\n".join(line.strip() for line in transcript_lines if line.strip())
             with open(filepath, "w", encoding="utf-8") as f:
-                 f.write(final_transcript.strip() + "\n")
+                 f.write(final_transcript.strip() + "\n") # Add final newline
             print("Transcript saved.")
         except Exception as e:
             print(f"Error saving transcript: {e}")
@@ -493,43 +514,49 @@ class InterviewApp(QWidget):
 
     # --- Button State Helper ---
     def set_recording_button_state(self, state): # Update record/submit button
-        # ... (keep existing set recording button state code) ...
         if not hasattr(self, 'submit_button'): return
-        current_icon = self.submit_button.icon()
         target_icon = None
         target_text = "Submit Answer" # Default
 
+        # Get icons dynamically using the helper (safer if assets changed)
+        submit_icon = self._load_icon_internal("send.png", self.icon_size)
+        record_icon = self._load_icon_internal("mic_black_36dp.png", self.icon_size)
+        listening_icon = self._load_icon_internal("record_wave.png", self.icon_size)
+        processing_icon = self._load_icon_internal("spinner.png", self.icon_size)
+
+
         if state == 'listening':
             target_text = "Listening..."
-            target_icon = self.listening_icon
+            target_icon = listening_icon
             self.submit_button.setEnabled(False) # Cannot click while listening
         elif state == 'processing':
             target_text = "Processing..."
-            target_icon = self.processing_icon
+            target_icon = processing_icon
             self.submit_button.setEnabled(False) # Cannot click while processing
         elif state == 'idle':
             self.submit_button.setEnabled(True) # Enable when idle
             if self.use_speech_input:
                  target_text = "Record Answer"
-                 target_icon = self.record_icon
+                 target_icon = record_icon
             else:
                  target_text = "Submit Answer"
-                 target_icon = self.submit_icon
+                 target_icon = submit_icon
         else: # Fallback (treat as idle)
             self.submit_button.setEnabled(True) # Assume enabled in fallback
-            if self.use_speech_input: target_text, target_icon = "Record Answer", self.record_icon
-            else: target_text, target_icon = "Submit Answer", self.submit_icon
+            if self.use_speech_input: target_text, target_icon = "Record Answer", record_icon
+            else: target_text, target_icon = "Submit Answer", submit_icon
 
         self.submit_button.setText(target_text)
-        if target_icon:
+        if target_icon and not target_icon.isNull():
             self.submit_button.setIcon(target_icon)
             self.submit_button.setIconSize(self.icon_size) # Ensure size
         else:
-            self.submit_button.setIcon(QIcon()) # Clear icon if none specified
+            self.submit_button.setIcon(QIcon()) # Clear icon if none specified or loading failed
+
 
     # --- GUI Logic/Event Handlers ---
 
-    # <<<--- ADDED: Handler for OpenAI TTS Checkbox --- >>>
+    # --- Handler for OpenAI TTS Checkbox ---
     def _handle_openai_tts_change(self, check_state_value):
         """Handles the state change of the OpenAI TTS checkbox."""
         is_checked = (check_state_value == Qt.CheckState.Checked.value)
@@ -575,20 +602,26 @@ class InterviewApp(QWidget):
             self.update_status(status_msg)
             # Show a more specific error if trying to enable OpenAI failed
             if is_checked:
+                 # Construct Keyring info string safely
+                 openai_keyring_info = ""
+                 try:
+                     openai_keyring_info = f"(Service: '{tts.tts_providers['openai'].KEYRING_SERVICE_NAME_OPENAI}')"
+                 except (KeyError, AttributeError):
+                     openai_keyring_info = "(Keyring details unavailable)" # Fallback
+
                  self.show_message_box("warning", "OpenAI TTS Failed",
                                       f"Could not enable OpenAI TTS.\nPlease ensure:\n"
                                       f"- Dependencies are installed (openai, sounddevice, pydub, nltk, numpy).\n"
-                                      f"- API key is stored in keyring (Service: '{tts.tts_providers['openai'].KEYRING_SERVICE_NAME_OPENAI}').\n"
-                                      f"- FFmpeg is installed.\nCheck console for details. Using: {current_provider or 'None'}")
+                                      f"- API key is stored in keyring {openai_keyring_info}.\n"
+                                      f"- FFmpeg is installed and in PATH.\nCheck console for details. Using: {current_provider or 'None'}")
 
 
         # Re-enable signals
         if hasattr(self, 'openai_tts_checkbox') and self.openai_tts_checkbox:
             self.openai_tts_checkbox.blockSignals(False)
-    # <<<--- END ADDED Handler --->>>
+
 
     def update_submit_button_text(self, check_state_value=None): # Simplified, uses set_recording_button_state
-        # ... (keep existing update submit button text code) ...
         # Handle state change from checkbox signal if provided
         if check_state_value is not None:
             # Qt.CheckState.Checked.value is typically 2
@@ -596,14 +629,15 @@ class InterviewApp(QWidget):
             print(f"Use Speech Input (STT): {self.use_speech_input}")
 
         # Update button appearance only if not currently recording/processing
-        if not self.is_recording: # Also check if not processing? Button state handles this.
+        if not self.is_recording:
             self.set_recording_button_state('idle') # Update idle appearance based on new mode
 
         # Enable/disable text input based on mode
         if hasattr(self, 'answer_input'):
             is_text_mode = not self.use_speech_input
             # Check if interview controls are generally enabled (submit button is a good proxy)
-            controls_enabled = hasattr(self, 'submit_button') and self.submit_button.isEnabled()
+            # Controls are enabled if the submit button is enabled AND we are not recording
+            controls_enabled = hasattr(self, 'submit_button') and self.submit_button.isEnabled() and not self.is_recording
 
             # Set read-only based on mode
             self.answer_input.setReadOnly(not is_text_mode)
@@ -616,16 +650,14 @@ class InterviewApp(QWidget):
             elif not is_text_mode:
                 self.answer_input.clear() # Clear text if switching to speech
                 self.answer_input.setPlaceholderText("Click 'Record Answer'...")
-            else: # Text mode but controls disabled (e.g., waiting for question)
-                 self.answer_input.setPlaceholderText("Waiting for question...")
+            else: # Text mode but controls disabled (e.g., waiting for question or recording active)
+                 self.answer_input.setPlaceholderText("Waiting...")
 
 
     def select_resume_file(self): # Update status bar
-        # ... (keep existing select resume file code) ...
-        start_dir = os.path.expanduser("~")
-        # Ensure consistent slashes for QFileDialog
+        start_dir = os.path.expanduser("~") # Start in home directory
         start_dir_native = start_dir.replace('/', os.path.sep)
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select PDF", start_dir_native, "PDF Files (*.pdf)") # Changed filter slightly
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select PDF", start_dir_native, "PDF Files (*.pdf)")
         if not filepath:
             if hasattr(self, 'file_label') and not self.pdf_filepath: # Only update if no file was previously selected
                 self.file_label.setText("Selection cancelled.")
@@ -639,15 +671,13 @@ class InterviewApp(QWidget):
         if hasattr(self, 'file_label'):
             self.file_label.setText(filename)
 
-        # --- Extract text immediately --- Changed slightly to handle extraction here
+        # --- Extract text immediately ---
         self.update_status(f"Extracting text from '{filename}'...", True)
         QApplication.processEvents() # Ensure UI updates
         self.resume_content = logic.extract_text_from_pdf(self.pdf_filepath)
-        # QApplication.restoreOverrideCursor() # Restore cursor after extraction
         self.update_status("", False) # Clear busy status AFTER extraction attempt
 
         if self.resume_content is None:
-             # Keep busy indicator off
              self.show_message_box("error", "PDF Error", f"Failed to extract text from {filename}. It might be image-based, empty, or protected.")
              self.pdf_filepath = None # Reset path
              if hasattr(self, 'file_label'): self.file_label.setText("Extraction Failed. Select again.")
@@ -661,15 +691,15 @@ class InterviewApp(QWidget):
         if hasattr(self, 'job_desc_input'):
             self.job_desc_input.setFocus()
 
+
     def start_interview_process(self): # Navigate on success
-        # ... (keep existing start interview process code) ...
         if not self.pdf_filepath or not self.resume_content: # Check content too
             self.show_message_box("warning", "Input Missing", "Select resume PDF and ensure text was extracted.")
             return
         if hasattr(self, 'job_desc_input'):
             self.job_description_text = self.job_desc_input.toPlainText().strip()
 
-        # --- ADDED: Check if OpenAI TTS is selected but failed init ---
+        # --- Check if OpenAI TTS is selected but failed init ---
         if self.use_openai_tts and "openai" not in tts.get_runtime_available_providers():
              self.show_message_box("error", "TTS Provider Error",
                                    "OpenAI TTS is selected, but failed to initialize.\n"
@@ -679,12 +709,11 @@ class InterviewApp(QWidget):
         # --- END ADDED ---
 
         print(f"Preparing: Topics={self.num_topics}, FollowUps={self.max_follow_ups}, SpeechInput={self.use_speech_input}, OpenAITTS={self.use_openai_tts}")
-        # Reset interview progress state, keep config
-        self.reset_interview_state(clear_config=False) # Keep use_openai_tts setting
+        # Reset interview progress state, keep config (including TTS choice)
+        self.reset_interview_state(clear_config=False)
 
         self.update_status(f"Generating {self.num_topics} questions...", True)
         self.set_setup_controls_state(False) # Disable setup controls while generating
-        # Disable select button explicitly during generation
         if hasattr(self, 'select_btn'): self.select_btn.setEnabled(False)
         QApplication.processEvents()
 
@@ -698,15 +727,13 @@ class InterviewApp(QWidget):
         # Restore UI state after generation attempt
         self.update_status("", False) # Clear busy
         # Re-enable setup controls *if PDF is still valid* (which it is here)
-        # Select button is always re-enabled here
-        if hasattr(self, 'select_btn'): self.select_btn.setEnabled(True)
-        self.set_setup_controls_state(True) # Re-enable other controls
-
+        pdf_loaded = bool(self.pdf_filepath) # Re-check just in case
+        self.set_setup_controls_state(pdf_loaded)
+        if hasattr(self, 'select_btn'): self.select_btn.setEnabled(True) # Select always re-enabled if not generating
 
         if not self.initial_questions:
             self.update_status("Error generating questions", False)
             self.show_message_box("error", "Generation Error", "Failed to generate initial questions. Check API key/keyring and console logs.")
-            # No need to call set_setup_controls_state again, already done above
             return
 
         # --- Success ---
@@ -714,10 +741,8 @@ class InterviewApp(QWidget):
         self.cleaned_initial_questions = {self._clean_question_text(q) for q in self.initial_questions}
         if len(self.initial_questions) < self.num_topics:
              print(f"Warning: Model generated {len(self.initial_questions)} questions (requested {self.num_topics}).")
-             # Optionally inform user briefly via status bar
              self.update_status(f"Generated {len(self.initial_questions)} questions. Starting interview...")
              QTimer.singleShot(3000, lambda: self.update_status("Interview started.")) # Clear status after delay
-
 
         self._go_to_interview_page()
         self.current_initial_q_index = 0
@@ -725,11 +750,10 @@ class InterviewApp(QWidget):
 
 
     def start_next_topic(self): # Navigate on finish
-        # ... (keep existing start next topic code) ...
         if not self.initial_questions:
             print("Err: No initial questions available.")
             self.show_message_box("error", "Internal Error", "No initial questions found. Returning to setup.")
-            self._go_to_setup_page() # Go back to setup if failed
+            self._go_to_setup_page()
             return
 
         if 0 <= self.current_initial_q_index < len(self.initial_questions):
@@ -737,21 +761,20 @@ class InterviewApp(QWidget):
             self.follow_up_count = 0
             self.current_topic_history = []
             raw_q_text = self.initial_questions[self.current_initial_q_index]
-            self.current_topic_question = self._clean_question_text(raw_q_text) # Store cleaned context
+            self.current_topic_question = self._clean_question_text(raw_q_text)
             topic_marker = f"\n--- Topic {self.current_initial_q_index + 1}/{len(self.initial_questions)} ---\n"
             print(topic_marker.strip())
-            self.add_to_history(topic_marker, tag="topic_marker") # Display marker in UI
+            self.add_to_history(topic_marker, tag="topic_marker") # Display marker
             print(f"Asking Q {self.current_initial_q_index + 1}: {self.current_topic_question}")
             self.display_question(raw_q_text) # Ask the raw question (TTS happens here)
         else: # --- End of Interview ---
             print("\n--- Interview Finished ---")
             self.update_status("Generating results...", True)
             self.disable_interview_controls()
-            QApplication.processEvents() # Ensure UI updates
+            QApplication.processEvents()
 
             self.save_transcript_to_file() # Save transcript
 
-            # Generate results - consider threading
             print("Generating summary...")
             summary = logic.generate_summary_review(self.current_full_interview_history)
             print("Generating assessment...")
@@ -763,77 +786,71 @@ class InterviewApp(QWidget):
 
             self.update_status("Results ready.", False) # Clear busy state
 
-            # Handle potential generation errors before navigating
             if summary is None or summary.startswith(logic.ERROR_PREFIX):
                 self.show_message_box("warning", "Summary Error", f"Could not generate summary review.\n{summary or ''}")
-                summary = "*Summary generation failed.*" # Placeholder
+                summary = "*Summary generation failed.*"
             if assessment is None or assessment.startswith(logic.ERROR_PREFIX):
-                 # Only warn if JD was provided, otherwise assessment failure is expected
                  if self.job_description_text:
                      self.show_message_box("warning", "Assessment Error", f"Could not generate qualification assessment.\n{assessment or ''}")
-                 assessment = "*Assessment generation failed or N/A (No Job Description provided).*" # Placeholder
+                 assessment = "*Assessment generation failed or N/A (No Job Description provided).*"
 
-            self._go_to_results_page(summary, assessment) # Navigate to Results
+            self._go_to_results_page(summary, assessment) # Navigate
 
 
     def handle_answer_submission(self): # Uses set_recording_button_state
-        # ... (keep existing handle answer submission code) ...
-        if self.is_recording: print("Already recording..."); return
+        if self.is_recording:
+            print("Already recording...")
+            return
 
         if self.use_speech_input:
-            # Start STT
             print("Record button clicked...")
-            self.disable_interview_controls(is_recording_stt=True) # Set is_recording flag here
+            self.disable_interview_controls(is_recording_stt=True)
             self.update_status_stt("STT_Status: Starting Mic...")
             if hasattr(self, 'answer_input'): self.answer_input.clear()
-            # Determine indices for saving files
-            topic_idx = self.current_initial_q_index + 1 # Use 1-based index for topic
-            followup_idx = self.follow_up_count # Use 0-based index for follow-up within topic
-            # MODIFIED: Call recording module's function
+            topic_idx = self.current_initial_q_index + 1
+            followup_idx = self.follow_up_count
             recording.start_speech_recognition(topic_idx, followup_idx)
         else: # Text submission
             print("Submit button clicked.")
-            if not hasattr(self, 'answer_input'): print("Error: answer_input missing."); return
+            if not hasattr(self, 'answer_input'):
+                print("Error: answer_input missing.")
+                return
             user_answer = self.answer_input.toPlainText().strip()
             if not user_answer:
                 self.show_message_box("warning", "Input Required", "Please enter your answer.")
                 return
-            # Process text answer directly
             self.process_answer(user_answer)
 
 
     def update_status_stt(self, message): # Update Status Bar, trigger button state change
-        # ... (keep existing update status stt code) ...
         if not self.status_bar_label: return
         display_message = message
         button_state = 'idle' # Default state unless overridden
 
-        # Map internal status messages to user display text and button appearance
         if message == "STT_Status: Starting Mic...":
              display_message = "[Starting Mic...]"
              button_state = 'processing'
-        elif message == "STT_Status: Adjusting Mic...": # Added handling for adjustment message
+        elif message == "STT_Status: Adjusting Mic...":
              display_message = "[Calibrating microphone...]"
-             button_state = 'processing' # Show processing during adjustment
+             button_state = 'processing'
         elif message == "STT_Status: Listening...":
              display_message = "[Listening... Speak Now]"
              button_state = 'listening'
         elif message == "STT_Status: Processing...":
              display_message = "[Processing Speech...]"
              button_state = 'processing'
-        elif message.startswith("STT_Warning:"): # Handle warnings
+        elif message.startswith("STT_Warning:"):
              warning_detail = message.split(':', 1)[1].strip()
              display_message = f"[STT Warning: {warning_detail}]"
-             button_state = 'idle' # Return to idle after warning, controls enabled elsewhere
-             self.is_recording = False # Ensure recording state is reset on warning
+             button_state = 'idle'
+             self.is_recording = False # Reset recording state
         elif message.startswith("STT_Error:"):
              error_detail = message.split(':', 1)[1].strip()
              display_message = f"[STT Error: {error_detail}]"
-             button_state = 'idle' # Return to idle after error, controls enabled elsewhere
-             self.is_recording = False # Ensure recording state is reset on error
+             button_state = 'idle'
+             self.is_recording = False # Reset recording state
         elif message.startswith("STT_Success:"):
              display_message = "[Speech Recognized]"
-             # State will be idle after processing, let check_stt_queue handle enabling controls
              button_state = 'idle'
              # self.is_recording = False # Done in check_stt_queue
 
@@ -841,120 +858,105 @@ class InterviewApp(QWidget):
         self.set_recording_button_state(button_state) # Update button appearance/state
         QApplication.processEvents() # Ensure UI updates
 
+
     def check_stt_queue(self): # Uses set_recording_button_state
-        # ... (keep existing check stt queue code) ...
         try:
-            # MODIFIED: Access queue from recording module
             result = recording.stt_result_queue.get_nowait()
             print(f"STT Queue Received: {result}")
 
-            # Process based on message prefix
-            if result.startswith("STT_Status:") or result.startswith("STT_Warning:"): # Handle warnings too
+            if result.startswith("STT_Status:") or result.startswith("STT_Warning:"):
                 self.update_status_stt(result)
-                # If warning/error status resets state, re-enable controls here
+                # If warning/error status resets state, re-enable controls
                 if result.startswith("STT_Warning:") or result.startswith("STT_Error:"):
-                     self.enable_interview_controls() # Ensure controls are usable after non-success status
+                     if not self.is_recording: # Double check state just in case
+                          self.enable_interview_controls()
             elif result.startswith("STT_Success:"):
-                # update_status_stt already set button to idle
-                self.is_recording = False # Recording done
+                self.is_recording = False # Recording definitely done
                 self.update_status_stt(result) # Show success briefly
-                transcript = result.split(":", 1)[1].strip() # Extract text
+                transcript = result.split(":", 1)[1].strip()
 
-                # Display transcript in answer box (temporarily editable)
                 if hasattr(self, 'answer_input'):
-                    # Make it briefly editable to display text, then disable again
+                    # Make briefly editable to display text, then disable again
                     self.answer_input.setEnabled(True)
                     self.answer_input.setReadOnly(False)
                     self.answer_input.setText(transcript)
-                    self.answer_input.setReadOnly(True) # Make read-only again
-                    self.answer_input.setEnabled(False) # Disable until next question (done in process_answer)
+                    self.answer_input.setReadOnly(True)
+                    self.answer_input.setEnabled(False) # Will be disabled in process_answer too
 
-                # Process the recognized text
-                self.process_answer(transcript) # process_answer will disable controls again
+                self.process_answer(transcript) # Handles next step
 
             elif result.startswith("STT_Error:"):
                 self.is_recording = False # Recording stopped
                 error_message = result.split(":", 1)[1].strip()
                 self.update_status_stt(result) # Show error status
                 self.show_message_box("error", "STT Error", error_message)
-                self.enable_interview_controls() # Re-enable controls after error
+                self.enable_interview_controls() # Re-enable controls
 
         except queue.Empty:
-            pass # No message, nothing to do
+            pass # No message
         except Exception as e:
             print(f"STT Queue Check Error: {e}")
-            # Safety reset if error happens during recording check
-            if self.is_recording:
+            if self.is_recording: # Safety reset
                 self.is_recording = False
                 self.set_recording_button_state('idle')
                 self.enable_interview_controls()
 
 
     def process_answer(self, user_answer):
-        # ... (keep existing process answer code) ...
         last_q = self.last_question_asked if hasattr(self, 'last_question_asked') and self.last_question_asked else "[Unknown Q]"
         print(f"Processing answer for Q: '{last_q[:50]}...' -> A: '{user_answer[:50]}...'")
 
-        # Record Q&A (using raw question text)
         q_data = {"q": last_q, "a": user_answer}
         if hasattr(self, 'current_topic_history'): self.current_topic_history.append(q_data)
         if hasattr(self, 'current_full_interview_history'): self.current_full_interview_history.append(q_data)
 
-        # Add to transcript view (using raw question text)
         self.add_to_history(f"Q: {last_q}\n", tag="question_style")
         self.add_to_history(f"A: {user_answer}\n\n", tag="answer_style")
 
-        # Prepare for next step
         if hasattr(self, 'answer_input'): self.answer_input.clear()
-        self.disable_interview_controls() # Disable input while generating response
+        self.disable_interview_controls() # Disable while generating response
         self.update_status("Generating response...", True)
         QApplication.processEvents()
 
-        # Follow-up logic
         proceed_to_next = False
         if hasattr(self, 'follow_up_count') and hasattr(self, 'max_follow_ups') and self.follow_up_count < self.max_follow_ups:
-            # Generate follow-up
             follow_up_q = logic.generate_follow_up_question(
-                context_question=self.current_topic_question, # Original cleaned topic question
+                context_question=self.current_topic_question,
                 user_answer=user_answer,
-                conversation_history=self.current_topic_history # History for this topic
+                conversation_history=self.current_topic_history
             )
-            self.update_status("", False) # Clear busy state after LLM call
+            self.update_status("", False) # Clear busy
 
             if follow_up_q and follow_up_q != "[END TOPIC]":
-                # Ask follow-up
                 self.follow_up_count += 1
                 print(f"Asking Follow-up: {follow_up_q}")
-                self.display_question(follow_up_q) # display_question re-enables controls
+                self.display_question(follow_up_q) # Re-enables controls
             elif follow_up_q == "[END TOPIC]":
                 print("End topic signal received from model.")
-                proceed_to_next = True # Move to next topic
+                proceed_to_next = True
             else: # Handle generation error (None returned)
                 print("Follow-up generation failed.")
-                self.show_message_box("warning", "Generation Error", "Error generating follow-up question. Moving to next topic.") # Changed to warning
+                self.show_message_box("warning", "Generation Error", "Error generating follow-up question. Moving to next topic.")
                 proceed_to_next = True
-        else: # Max follow-ups reached or feature disabled
+        else: # Max follow-ups reached or disabled
              print("Max follow-ups reached or follow-ups disabled.")
-             self.update_status("", False) # Clear busy state
+             self.update_status("", False)
              proceed_to_next = True
 
-        # Move to next topic if necessary
         if proceed_to_next:
              if hasattr(self, 'current_initial_q_index'):
-                 self.current_initial_q_index += 1 # Go to next index
-                 self.start_next_topic() # Start next or finish interview (handles enabling controls)
+                 self.current_initial_q_index += 1
+                 self.start_next_topic() # Starts next or finishes
              else:
-                  # Should not happen if state is managed correctly
                   print("Error: current_initial_q_index missing!")
-                  self._go_to_setup_page() # Fallback: go to setup
+                  self._go_to_setup_page()
 
-        # Ensure cursor is restored if still busy for some reason (shouldn't be)
         if QApplication.overrideCursor() is not None: QApplication.restoreOverrideCursor()
 
 
     # --- Results Page Actions ---
     def _save_report(self):
-        # ... (keep existing save report code) ...
+        # Use the absolute RECORDINGS_DIR path
         if not (hasattr(self, 'summary_text_results') and hasattr(self, 'assessment_text_results')):
              self.show_message_box("warning", "No Data", "Results widgets not found.")
              return
@@ -962,57 +964,58 @@ class InterviewApp(QWidget):
         assessment = self.assessment_text_results.toPlainText().strip()
         if not summary and not assessment:
             self.show_message_box("warning", "No Data", "Results are empty.")
-            return # Changed from pass to return
+            return
 
-        # Prepare report content
         report_content = f"Interview Report\n{'='*16}\n\nPerformance Summary\n{'-'*19}\n{summary}\n\nQualification Assessment\n{'-'*24}\n{assessment}\n"
 
-        # Determine default filename and path
         default_filename = "interview_report.txt"
         if self.pdf_filepath:
             base = os.path.splitext(os.path.basename(self.pdf_filepath))[0]
             default_filename = f"{base}_interview_report.txt"
-        # Use imported RECORDINGS_DIR, fallback to home directory
-        save_dir = RECORDINGS_DIR if os.path.exists(RECORDINGS_DIR) else os.path.expanduser("~")
-        # Ensure consistent slashes for save dialog default path
-        save_dir_native = save_dir.replace('/', os.path.sep)
-        default_path = os.path.join(save_dir_native, default_filename)
 
-        # Open save dialog
+        # --- Use user-specific directory (absolute path) ---
+        save_dir = RECORDINGS_DIR # Already absolute path to user dir
+        try:
+            os.makedirs(save_dir, exist_ok=True) # Ensure it exists
+        except OSError as e:
+             print(f"Warning: Could not create directory for saving report: {e}")
+             # Fallback to home directory if creation fails
+             save_dir = os.path.expanduser("~")
+
+        default_path = os.path.join(save_dir, default_filename) # default_path is absolute
+        # --- END MODIFICATION ---
+
         filepath, _ = QFileDialog.getSaveFileName(self, "Save Report", default_path, "Text Files (*.txt);;All Files (*)")
 
         if filepath:
             try:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(report_content)
+                with open(filepath, 'w', encoding='utf-8') as f: f.write(report_content)
                 self.update_status(f"Report saved.")
                 self.show_message_box("info", "Report Saved", f"Report saved to:\n{filepath}")
             except Exception as e:
                 print(f"Error saving report: {e}")
                 self.show_message_box("error", "Save Error", f"Could not save report:\n{e}")
         else:
-            self.update_status("Report save cancelled.") # Update status if cancelled
+            self.update_status("Report save cancelled.")
+
 
     def _open_recordings_folder(self):
-        # ... (keep existing open recordings folder code) ...
-        # Use imported RECORDINGS_DIR constant
-        folder_path = os.path.abspath(RECORDINGS_DIR)
-        print(f"Opening folder: {folder_path}")
+        # Use the absolute RECORDINGS_DIR path
+        folder_path = RECORDINGS_DIR
+        print(f"Opening user recordings folder: {folder_path}")
 
-        # Create directory if it doesn't exist
+        # Create directory if it doesn't exist (safe check)
         if not os.path.exists(folder_path):
             try:
-                os.makedirs(folder_path)
-                print(f"Created recordings directory: {folder_path}")
-                # Optionally inform the user it was created
-                # self.show_message_box("info", "Folder Created", f"Recordings folder created at:\n{folder_path}")
+                os.makedirs(folder_path, exist_ok=True)
+                print(f"Created recordings directory before opening: {folder_path}")
             except OSError as e:
-                 print(f"Error creating directory: {e}")
+                 print(f"Error creating directory before opening: {e}")
                  self.show_message_box("error", "Folder Error", f"Could not create recordings folder:\n{folder_path}\nError: {e}")
                  self.update_status("Failed to create folder.")
-                 return # Don't try to open if creation failed
+                 return
 
-        # Attempt to open using QDesktopServices (more cross-platform)
+        # Attempt to open using QDesktopServices
         url = QUrl.fromLocalFile(folder_path)
         if not QDesktopServices.openUrl(url):
             print(f"QDesktopServices failed. Trying fallback...")
@@ -1021,7 +1024,6 @@ class InterviewApp(QWidget):
             try:
                 system = platform.system()
                 if system == "Windows":
-                    # Use explorer for better experience (selects folder)
                     subprocess.Popen(['explorer', os.path.normpath(folder_path)])
                 elif system == "Darwin": # macOS
                     subprocess.Popen(["open", folder_path])
@@ -1043,7 +1045,6 @@ class InterviewApp(QWidget):
 
     # --- Window Close ---
     def closeEvent(self, event):
-        # --- MODIFIED: Add TTS stop ---
         print("Closing application window...")
         if hasattr(self, 'stt_timer'):
             self.stt_timer.stop()
@@ -1051,23 +1052,15 @@ class InterviewApp(QWidget):
 
         # Stop any ongoing TTS playback
         print("Stopping any active TTS...")
-        # Access stop function through the facade
         current_provider_name = tts.get_current_provider()
         if current_provider_name and current_provider_name in tts.tts_providers:
              provider_module = tts.tts_providers[current_provider_name]
              if hasattr(provider_module, 'stop_playback'):
-                 try:
-                     provider_module.stop_playback()
-                     print(f"Stop signal sent to TTS provider '{current_provider_name}'.")
-                 except Exception as tts_stop_err:
-                      print(f"Error calling stop_playback for {current_provider_name}: {tts_stop_err}")
-             else:
-                 print(f"TTS provider '{current_provider_name}' does not have stop_playback method.")
-        else:
-            print("No active/valid TTS provider to stop.")
+                 try: provider_module.stop_playback()
+                 except Exception as tts_stop_err: print(f"Error stopping TTS: {tts_stop_err}")
+        else: print("No active TTS provider to stop.")
 
-   
+        # TODO: Add explicit stop signal for recording thread if necessary
 
         print("Cleanup attempts complete.")
         event.accept()
-        # --- END MODIFICATION ---

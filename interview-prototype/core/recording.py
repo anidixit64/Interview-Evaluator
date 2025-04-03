@@ -8,9 +8,30 @@ import os
 import speech_recognition as sr
 import queue
 import cv2
+from pathlib import Path # Use pathlib for robust path handling
 
 # --- Configuration ---
-RECORDINGS_DIR = "recordings" # Directory for ALL recorded files (audio, video, transcript)
+# <<< MODIFIED: Point to a user-specific directory inside Documents >>>
+_APP_NAME_FOR_DIRS = "InterviewBotPro" # Use a consistent name
+
+# Get the user's Documents directory in a cross-platform way
+try:
+    # Modern Python approach using pathlib
+    _DOCUMENTS_DIR = str(Path.home() / "Documents")
+    if not os.path.isdir(_DOCUMENTS_DIR): # Fallback if "Documents" doesn't exist
+        _DOCUMENTS_DIR = str(Path.home())
+except Exception:
+    # Older fallback if Path.home() fails for some reason
+    _DOCUMENTS_DIR = os.path.expanduser("~/Documents")
+    if not os.path.isdir(_DOCUMENTS_DIR):
+        _DOCUMENTS_DIR = os.path.expanduser("~")
+
+
+# Define the recordings directory inside Documents
+RECORDINGS_DIR = os.path.join(_DOCUMENTS_DIR, _APP_NAME_FOR_DIRS, "recordings")
+
+print(f"Recording Handler: Using recordings directory: {RECORDINGS_DIR}")
+# --- END MODIFICATION ---
 
 # --- Video Recording Configuration ---
 VIDEO_CAMERA_INDEX = 0 # Default webcam
@@ -59,8 +80,8 @@ def _record_video_loop(video_capture, video_writer, stop_event, filename, target
                 try:
                     video_writer.write(frame)
                     frames_written += 1
-                    if frame_count == 0:
-                         print(f"Recording Handler (Video): First frame written to {filename}.")
+                    # if frame_count == 0: # Reduce log noise
+                    #      print(f"Recording Handler (Video): First frame written to {filename}.")
                     frame_count += 1
                 except Exception as write_err:
                      print(f"Recording Handler (Video) Error writing frame to {filename}: {write_err}")
@@ -102,6 +123,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
     audio_processing_done = False
 
     try:
+        # Ensure user-specific directory exists before recording
         os.makedirs(RECORDINGS_DIR, exist_ok=True)
 
         # --- Adjust for ambient noise ONCE ---
@@ -123,17 +145,17 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                          _ambient_noise_adjusted = True # Prevent retries
                     except Exception as e:
                          print(f"Recording Handler (STT) Warning: Initial ambient noise adjustment failed: {e}. Using default threshold: {initial_threshold}")
-                         stt_result_queue.put(f"STT_Warning: Mic Adjust Failed: {e}")
+                         stt_result_queue.put(f"STT_Warning: Mic Adjust Failed") # Simplified message
                          _recognizer.energy_threshold = initial_threshold
                          _ambient_noise_adjusted = True # Prevent retries
-        else:
-            print(f"Recording Handler (STT): Using pre-calibrated fixed energy threshold: {_recognizer.energy_threshold:.2f}")
+        # else: # Reduce log noise
+            # print(f"Recording Handler (STT): Using pre-calibrated fixed energy threshold: {_recognizer.energy_threshold:.2f}")
         # --- End Adjustment ---
 
         # --- Initialize Video Recording ---
         try:
             video_filename = f"{topic_idx}.{follow_up_idx}{VIDEO_EXTENSION}"
-            video_filepath = os.path.join(RECORDINGS_DIR, video_filename)
+            video_filepath = os.path.join(RECORDINGS_DIR, video_filename) # Use absolute path
             print(f"Recording Handler (Video): Initializing camera index {VIDEO_CAMERA_INDEX}...")
             video_capture = cv2.VideoCapture(VIDEO_CAMERA_INDEX)
 
@@ -150,17 +172,16 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
             print(f"Recording Handler (Video): Preparing writer for {video_filepath} with TARGET FPS: {fps_for_writer}")
             video_writer = cv2.VideoWriter(video_filepath, fourcc, fps_for_writer, (frame_width, frame_height))
 
+            # Retry logic for VideoWriter opening (can sometimes fail intermittently)
             if not video_writer.isOpened():
-                 if video_capture is not None and video_capture.isOpened(): video_capture.release()
-                 print(f"Recording Handler (Video): Retrying VideoWriter initialization for {video_filepath}...")
+                 print(f"Recording Handler (Video): Initial VideoWriter open failed for {video_filepath}. Retrying...")
+                 time.sleep(0.5) # Brief pause before retry
                  video_writer = cv2.VideoWriter(video_filepath, fourcc, fps_for_writer, (frame_width, frame_height))
                  if not video_writer.isOpened():
                       raise IOError(f"Could not open VideoWriter for file after retry: {video_filepath}")
                  else:
-                      print(f"Recording Handler (Video): VideoWriter succeeded on retry. Re-opening camera...")
-                      video_capture = cv2.VideoCapture(VIDEO_CAMERA_INDEX)
-                      if not video_capture.isOpened():
-                           raise IOError("Could not re-open webcam after writer success on retry")
+                      print(f"Recording Handler (Video): VideoWriter succeeded on retry.")
+                      # No need to reopen camera if it was opened successfully before
 
             video_thread = threading.Thread(
                 target=_record_video_loop,
@@ -173,6 +194,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
 
         except Exception as video_init_err:
             print(f"Recording Handler (Video) Warning: Failed to initialize video recording: {video_init_err}")
+            # Clean up resources if init failed partially
             if video_writer is not None and video_writer.isOpened(): video_writer.release()
             if video_capture is not None and video_capture.isOpened(): video_capture.release()
             video_capture = video_writer = video_thread = None
@@ -187,6 +209,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                 stt_result_queue.put("STT_Status: Listening...")
                 audio = None
                 try:
+                    # Listen with timeout and phrase limit
                     audio = _recognizer.listen(source, timeout=5, phrase_time_limit=30)
                     print("Recording Handler (STT): Audio captured.")
                 except sr.WaitTimeoutError:
@@ -194,13 +217,13 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                     stt_result_queue.put("STT_Error: No speech detected.")
                 except Exception as listen_e:
                      print(f"Recording Handler (STT): Error during listening phase: {listen_e}")
-                     stt_result_queue.put(f"STT_Error: Listening Failed: {listen_e}")
+                     stt_result_queue.put(f"STT_Error: Listening Failed") # Simplified
 
-                # Save audio
+                # Save audio file if captured
                 if audio:
                     try:
                         audio_filename = f"{topic_idx}.{follow_up_idx}.wav"
-                        audio_filepath = os.path.join(RECORDINGS_DIR, audio_filename)
+                        audio_filepath = os.path.join(RECORDINGS_DIR, audio_filename) # Use absolute path
                         print(f"Recording Handler (STT): Saving audio to {audio_filepath}...")
                         wav_data = audio.get_wav_data()
                         with open(audio_filepath, "wb") as f:
@@ -209,7 +232,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                     except Exception as save_err:
                         print(f"Recording Handler (STT) Warning: Failed to save audio file {audio_filename}: {save_err}")
 
-                # Recognize audio
+                # Recognize audio if captured
                 if audio:
                     stt_result_queue.put("STT_Status: Processing...")
                     try:
@@ -222,24 +245,29 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                         stt_result_queue.put("STT_Error: Could not understand audio.")
                     except sr.RequestError as e:
                         print(f"Recording Handler (STT): Google Web Speech API request failed; {e}")
-                        stt_result_queue.put(f"STT_Error: API/Network Error: {e}")
+                        stt_result_queue.put(f"STT_Error: API/Network Error") # Simplified
                     except Exception as recog_e:
                         print(f"Recording Handler (STT): Unknown error during recognition: {recog_e}")
-                        stt_result_queue.put(f"STT_Error: Recognition Failed: {recog_e}")
+                        stt_result_queue.put(f"STT_Error: Recognition Failed") # Simplified
 
         except OSError as e:
-             print(f"Recording Handler (STT) Error: Microphone OS Error: {e}")
-             stt_result_queue.put(f"STT_Error: Microphone Access Failed: {e}")
+             # Specific check for device unavailable error
+             if "Invalid input device" in str(e) or "No Default Input Device Available" in str(e):
+                 print(f"Recording Handler (STT) Error: Microphone device error: {e}")
+                 stt_result_queue.put(f"STT_Error: Microphone Device Unavailable")
+             else:
+                 print(f"Recording Handler (STT) Error: Microphone OS Error: {e}")
+                 stt_result_queue.put(f"STT_Error: Microphone Access Failed")
         except AttributeError as e:
             if "'NoneType' object has no attribute 'get_pyaudio'" in str(e):
                  print("Recording Handler (STT) Error: PyAudio not found or failed to initialize.")
                  stt_result_queue.put(f"STT_Error: PyAudio Missing/Failed")
             else:
                  print(f"Recording Handler (STT) Error: Attribute Error during setup: {e}")
-                 stt_result_queue.put(f"STT_Error: Setup Attribute Error: {e}")
+                 stt_result_queue.put(f"STT_Error: Setup Attribute Error")
         except Exception as setup_e:
             print(f"Recording Handler (STT) Error: Failed to setup microphone: {setup_e}")
-            stt_result_queue.put(f"STT_Error: Mic Setup Failed: {setup_e}")
+            stt_result_queue.put(f"STT_Error: Mic Setup Failed")
         # --- End Audio Recording and STT ---
 
         audio_processing_done = True
@@ -247,15 +275,17 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
     except OSError as e:
         print(f"Recording Handler Error: Could not create recordings directory '{RECORDINGS_DIR}': {e}")
         stt_result_queue.put(f"STT_Error: Setup Failed - Cannot create directory.")
-        video_recording_started = False
+        video_recording_started = False # Ensure video flag is off
+        # Clean up video resources if directory creation failed after video init attempt
         if video_writer is not None and video_writer.isOpened(): video_writer.release()
         if video_capture is not None and video_capture.isOpened(): video_capture.release()
     except Exception as main_err:
         print(f"Recording Handler Error: Unexpected error in recognition thread: {main_err}")
-        stt_result_queue.put(f"STT_Error: Unexpected Thread Error: {main_err}")
+        stt_result_queue.put(f"STT_Error: Unexpected Thread Error")
+        # Ensure video resources are cleaned up on unexpected error
         if video_thread is not None and video_thread.is_alive():
             stop_video_event.set()
-        video_recording_started = False
+        video_recording_started = False # Ensure video flag is off
         if video_writer is not None and video_writer.isOpened(): video_writer.release()
         if video_capture is not None and video_capture.isOpened(): video_capture.release()
 
@@ -264,7 +294,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
         print(f"Recording Handler: Entering FINALLY block for {topic_idx}.{follow_up_idx}. Audio done: {audio_processing_done}")
         thread_was_joined_cleanly = False
 
-        if video_recording_started and stop_video_event:
+        if video_recording_started and stop_video_event and not stop_video_event.is_set():
             print("Recording Handler (Video): Signaling video thread to stop.")
             stop_video_event.set()
 
@@ -283,18 +313,21 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
             except Exception as join_err:
                  print(f"Recording Handler (Video) Error during video thread join: {join_err}")
 
+        # Ensure VideoWriter is released AFTER attempting to join the thread
         if video_writer is not None:
             if video_writer.isOpened():
                 print("Recording Handler (Video): Releasing VideoWriter...")
                 try:
                     video_writer.release()
                     print("Recording Handler (Video): VideoWriter released.")
-                    if not thread_was_joined_cleanly:
-                         print("Recording Handler (Video) Warning: VideoWriter released after thread join timeout/failure. File may be incomplete.")
+                    # Log if release happened after timeout
+                    if video_recording_started and not thread_was_joined_cleanly:
+                         print("Recording Handler (Video) Warning: VideoWriter released after thread join timeout/failure. File may be incomplete or corrupted.")
                 except Exception as vw_rel_err:
                      print(f"Recording Handler (Video) Error releasing VideoWriter: {vw_rel_err}")
-            # else: print("Recording Handler (Video): VideoWriter was not opened or already released.") # Optional log
+            # else: print("Recording Handler (Video): VideoWriter was not open or already released.") # Optional log
 
+        # Ensure VideoCapture is released
         if video_capture is not None:
             if video_capture.isOpened():
                 print("Recording Handler (Video): Releasing VideoCapture...")
@@ -303,7 +336,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                     print("Recording Handler (Video): VideoCapture released.")
                 except Exception as vc_rel_err:
                      print(f"Recording Handler (Video) Error releasing VideoCapture: {vc_rel_err}")
-            # else: print("Recording Handler (Video): VideoCapture was not opened or already released.") # Optional log
+            # else: print("Recording Handler (Video): VideoCapture was not open or already released.") # Optional log
 
         print(f"Recording Handler: Recognition thread FINALLY block finished for {topic_idx}.{follow_up_idx}.")
         # --- End GUARANTEED CLEANUP ---
@@ -316,6 +349,7 @@ def start_speech_recognition(topic_idx, follow_up_idx):
     Results/status will be put onto stt_result_queue.
     Clears the queue before starting.
     """
+    # Clear queue safely
     while not stt_result_queue.empty():
         try: stt_result_queue.get_nowait()
         except queue.Empty: break

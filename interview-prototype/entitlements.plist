@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Basic Permissions -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/> <!-- IMPORTANT: Assume NO sandbox for easier device/network/file access. -->
+             <!-- If you NEED a sandbox, you must grant specific exceptions below. -->
+
+    <!-- Network Access for APIs (Gemini, OpenAI, Google STT) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Hardware Access -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/> <!-- Microphone access for STT -->
+    <key>com.apple.security.device.camera</key>
+    <true/> <!-- Camera access for video recording -->
+
+    <!-- File Access -->
+    <!-- Allow access to user-selected files (PDF open, report save dialogs) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <!-- Allow access to the Documents folder where recordings/reports are saved -->
+    <key>com.apple.security.files.user-selected.read-write</key> <!-- Duplicate? No, should be documents -->
+    <key>com.apple.security.files.documents.read-write</key>
+    <true/>
+    <!-- Optionally allow Downloads folder access if it's a likely save target -->
+    <!-- <key>com.apple.security.files.downloads.read-write</key> -->
+    <!-- <true/> -->
+
+    <!-- Keychain Access for API Keys via 'keyring' -->
+    <!-- This grants access to keychain items matching the specified groups. -->
+    <!-- Using generic groups is common, but you could restrict further. -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.yourcompany.*</string> <!-- CHANGE 'yourcompany' -->
+        <string>shared.*</string> <!-- Common group, might not be strictly necessary -->
+    </array>
+    <!-- An alternative, more open (less secure) way for keychain if needed -->
+    <!-- <key>com.apple.security.keychain.access</key> -->
+    <!-- <true/> -->
+
+</dict>
+</plist>

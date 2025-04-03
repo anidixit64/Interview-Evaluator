@@ -13,16 +13,18 @@ from PyQt6.QtGui import QIcon, QPixmap, QFont, QTextCursor, QColor, QPalette, QC
 from PyQt6.QtCore import Qt, QSize
 
 from core import logic # For default values, limits
-from core import tts   # <<<--- ADDED: Import tts to check availability
+from core import tts   # Import tts to check availability
 
 # Helper function
-def _load_icon(icon_path_base, filename, size=None):
-    # ... (keep existing code) ...
+def _load_icon(icon_path_base, filename, size=None): # Receives resolved base path
+    """Loads an icon using the provided base path."""
     try:
+        # Use the provided base path directly
         path = os.path.join(icon_path_base, filename)
         if not os.path.exists(path):
-            print(f"Warn: Icon not found: {path}")
+            print(f"Icon Load Warning: Icon not found: {path}")
             return None
+        # Return the QIcon object; size is set on the widget later
         return QIcon(path)
     except Exception as e:
         print(f"Error loading icon {filename}: {e}")
@@ -36,12 +38,13 @@ def create_setup_page(parent_window):
     page_layout.setContentsMargins(15, 15, 15, 15)
     page_layout.setSpacing(20)
 
-    # Icons
-    select_icon = _load_icon(parent_window.icon_path, "folder.png", parent_window.icon_size)
-    start_icon = _load_icon(parent_window.icon_path, "play.png", parent_window.icon_size)
+    # Icons are loaded using the resolved path from parent_window
+    # parent_window.icon_path is set during InterviewApp.__init__
+    select_icon = _load_icon(parent_window.icon_path, "folder.png")
+    start_icon = _load_icon(parent_window.icon_path, "play.png")
     plus_icon = _load_icon(parent_window.icon_path, "plus.png")
     minus_icon = _load_icon(parent_window.icon_path, "minus.png")
-    button_icon_size = QSize(16, 16)
+    button_icon_size = QSize(16, 16) # Size for +/- buttons
 
     # --- Resume Section ---
     resume_group = QGroupBox("Load Resume")
@@ -50,6 +53,7 @@ def create_setup_page(parent_window):
     resume_layout.setSpacing(10)
     parent_window.select_btn = QPushButton("Select Resume PDF")
     if select_icon: parent_window.select_btn.setIcon(select_icon)
+    # Set size on the specific widget instance
     parent_window.select_btn.setIconSize(parent_window.icon_size)
     parent_window.select_btn.setFont(parent_window.font_default)
     parent_window.select_btn.clicked.connect(parent_window.select_resume_file)
@@ -64,11 +68,10 @@ def create_setup_page(parent_window):
     config_group = QGroupBox("Configure Interview")
     config_group.setFont(parent_window.font_large_bold)
     config_layout = QHBoxLayout(config_group)
-    config_layout.setSpacing(25) # Increased spacing a bit
+    config_layout.setSpacing(25)
 
-    # Topics Widget (Existing)
+    # Topics Widget
     topics_widget = QWidget()
-    # ... (keep existing topics layout code) ...
     topics_inner_layout = QHBoxLayout(topics_widget)
     topics_inner_layout.setContentsMargins(0,0,0,0)
     topics_inner_layout.setSpacing(5)
@@ -77,7 +80,7 @@ def create_setup_page(parent_window):
     parent_window.topic_minus_btn = QPushButton("")
     parent_window.topic_minus_btn.setObjectName("adjustButton")
     if minus_icon: parent_window.topic_minus_btn.setIcon(minus_icon)
-    parent_window.topic_minus_btn.setIconSize(button_icon_size)
+    parent_window.topic_minus_btn.setIconSize(button_icon_size) # Use specific size
     parent_window.topic_minus_btn.setFixedSize(QSize(28, 28))
     parent_window.topic_minus_btn.setToolTip("Decrease topics")
     parent_window.topic_minus_btn.clicked.connect(lambda: parent_window._adjust_value('topics', -1))
@@ -88,7 +91,7 @@ def create_setup_page(parent_window):
     parent_window.topic_plus_btn = QPushButton("")
     parent_window.topic_plus_btn.setObjectName("adjustButton")
     if plus_icon: parent_window.topic_plus_btn.setIcon(plus_icon)
-    parent_window.topic_plus_btn.setIconSize(button_icon_size)
+    parent_window.topic_plus_btn.setIconSize(button_icon_size) # Use specific size
     parent_window.topic_plus_btn.setFixedSize(QSize(28, 28))
     parent_window.topic_plus_btn.setToolTip("Increase topics")
     parent_window.topic_plus_btn.clicked.connect(lambda: parent_window._adjust_value('topics', +1))
@@ -98,9 +101,8 @@ def create_setup_page(parent_window):
     topics_inner_layout.addWidget(parent_window.topic_plus_btn)
     config_layout.addWidget(topics_widget)
 
-    # Follow-ups Widget (Existing)
+    # Follow-ups Widget
     followups_widget = QWidget()
-    # ... (keep existing follow-ups layout code) ...
     followups_inner_layout = QHBoxLayout(followups_widget)
     followups_inner_layout.setContentsMargins(0,0,0,0)
     followups_inner_layout.setSpacing(5)
@@ -109,7 +111,7 @@ def create_setup_page(parent_window):
     parent_window.followup_minus_btn = QPushButton("")
     parent_window.followup_minus_btn.setObjectName("adjustButton")
     if minus_icon: parent_window.followup_minus_btn.setIcon(minus_icon)
-    parent_window.followup_minus_btn.setIconSize(button_icon_size)
+    parent_window.followup_minus_btn.setIconSize(button_icon_size) # Use specific size
     parent_window.followup_minus_btn.setFixedSize(QSize(28, 28))
     parent_window.followup_minus_btn.setToolTip("Decrease follow-ups")
     parent_window.followup_minus_btn.clicked.connect(lambda: parent_window._adjust_value('followups', -1))
@@ -120,7 +122,7 @@ def create_setup_page(parent_window):
     parent_window.followup_plus_btn = QPushButton("")
     parent_window.followup_plus_btn.setObjectName("adjustButton")
     if plus_icon: parent_window.followup_plus_btn.setIcon(plus_icon)
-    parent_window.followup_plus_btn.setIconSize(button_icon_size)
+    parent_window.followup_plus_btn.setIconSize(button_icon_size) # Use specific size
     parent_window.followup_plus_btn.setFixedSize(QSize(28, 28))
     parent_window.followup_plus_btn.setToolTip("Increase follow-ups")
     parent_window.followup_plus_btn.clicked.connect(lambda: parent_window._adjust_value('followups', +1))
@@ -130,38 +132,34 @@ def create_setup_page(parent_window):
     followups_inner_layout.addWidget(parent_window.followup_plus_btn)
     config_layout.addWidget(followups_widget)
 
-    # --- MODIFIED: Add a separator for visual grouping ---
+    # Separator Line
     config_line = QFrame()
     config_line.setFrameShape(QFrame.Shape.VLine)
     config_line.setFrameShadow(QFrame.Shadow.Sunken)
     config_layout.addWidget(config_line)
-    # ---------------------------------------------------
 
-    # Speech Input Checkbox (Existing)
+    # Speech Input Checkbox
     parent_window.speech_checkbox = QCheckBox("Use Speech Input (STT)")
     parent_window.speech_checkbox.setFont(parent_window.font_default)
     parent_window.speech_checkbox.stateChanged.connect(parent_window.update_submit_button_text)
     config_layout.addWidget(parent_window.speech_checkbox)
 
-    # --- ADDED: OpenAI TTS Checkbox ---
+    # OpenAI TTS Checkbox
     parent_window.openai_tts_checkbox = QCheckBox("Use OpenAI TTS")
     parent_window.openai_tts_checkbox.setFont(parent_window.font_default)
     openai_available = "openai" in tts.get_potentially_available_providers()
     if openai_available:
         parent_window.openai_tts_checkbox.setToolTip("Use OpenAI for higher quality Text-to-Speech (requires API key in keyring).")
-        # Connect signal to handler in main_window.py
         parent_window.openai_tts_checkbox.stateChanged.connect(parent_window._handle_openai_tts_change)
     else:
-        parent_window.openai_tts_checkbox.setToolTip("OpenAI TTS unavailable (missing dependencies like openai, pydub, sounddevice, nltk, or keyring access failed). Check console.")
-        parent_window.openai_tts_checkbox.setEnabled(False)
+        parent_window.openai_tts_checkbox.setToolTip("OpenAI TTS unavailable (missing dependencies or API key/init failed). Check console.")
+        parent_window.openai_tts_checkbox.setEnabled(False) # Initially disabled if unavailable
     config_layout.addWidget(parent_window.openai_tts_checkbox)
-    # --- END ADDED Checkbox ---
 
     config_layout.addStretch()
 
     # --- Job Description Section ---
     jd_group = QGroupBox("Job Description (Optional)")
-    # ... (keep existing jd layout code) ...
     jd_group.setFont(parent_window.font_large_bold)
     jd_layout = QVBoxLayout(jd_group)
     parent_window.job_desc_input = QTextEdit()
@@ -171,17 +169,16 @@ def create_setup_page(parent_window):
     parent_window.job_desc_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     jd_layout.addWidget(parent_window.job_desc_input)
 
-    # --- Add Groups to Page Layout (Reordered) ---
+    # --- Add Groups to Page Layout ---
     page_layout.addWidget(resume_group)
     page_layout.addWidget(config_group)
     page_layout.addWidget(jd_group, stretch=1)
 
     # --- Start Button ---
     start_button_layout = QHBoxLayout()
-    # ... (keep existing start button code) ...
     parent_window.start_interview_btn = QPushButton("Next: Start Interview")
     if start_icon: parent_window.start_interview_btn.setIcon(start_icon)
-    parent_window.start_interview_btn.setIconSize(parent_window.icon_size)
+    parent_window.start_interview_btn.setIconSize(parent_window.icon_size) # Set size
     parent_window.start_interview_btn.setFont(parent_window.font_bold)
     parent_window.start_interview_btn.setFixedHeight(40)
     parent_window.start_interview_btn.clicked.connect(parent_window.start_interview_process)
@@ -197,17 +194,17 @@ def create_setup_page(parent_window):
 
 # --- Page 2: Interview ---
 def create_interview_page(parent_window):
-    # ... (keep existing interview page code) ...
     page_widget = QWidget(parent_window)
     page_layout = QVBoxLayout(page_widget)
     page_layout.setContentsMargins(15, 15, 15, 15)
     page_layout.setSpacing(15)
 
-    # Icons
-    submit_icon = _load_icon(parent_window.icon_path, "send.png", parent_window.icon_size)
-    parent_window.record_icon = _load_icon(parent_window.icon_path, "mic_black_36dp.png", parent_window.icon_size)
-    parent_window.listening_icon = _load_icon(parent_window.icon_path, "record_wave.png", parent_window.icon_size)
-    parent_window.processing_icon = _load_icon(parent_window.icon_path, "spinner.png", parent_window.icon_size)
+    # Icons loaded using resolved path
+    submit_icon = _load_icon(parent_window.icon_path, "send.png")
+    # Store icons needed dynamically on parent_window
+    parent_window.record_icon = _load_icon(parent_window.icon_path, "mic_black_36dp.png")
+    parent_window.listening_icon = _load_icon(parent_window.icon_path, "record_wave.png")
+    parent_window.processing_icon = _load_icon(parent_window.icon_path, "spinner.png")
 
     # --- Interview Area ---
     interview_group = QGroupBox("Interview")
@@ -238,7 +235,7 @@ def create_interview_page(parent_window):
     parent_window.submit_button = QPushButton("Submit Answer")
     parent_window.submit_button.setObjectName("recordSubmitButton")
     if submit_icon: parent_window.submit_button.setIcon(submit_icon)
-    parent_window.submit_button.setIconSize(parent_window.icon_size)
+    parent_window.submit_button.setIconSize(parent_window.icon_size) # Set size
     parent_window.submit_button.setFont(parent_window.font_bold)
     parent_window.submit_button.clicked.connect(parent_window.handle_answer_submission)
     parent_window.submit_button.setFixedHeight(35)
@@ -271,23 +268,22 @@ def create_interview_page(parent_window):
     parent_window.history_text.setFont(parent_window.font_history)
     parent_window.history_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
     history_layout.addWidget(parent_window.history_text)
-    page_layout.addWidget(history_group, stretch=2) # Adjusted stretch
+    page_layout.addWidget(history_group, stretch=2)
 
     page_widget.setLayout(page_layout)
     return page_widget
 
 # --- Page 3: Results ---
 def create_results_page(parent_window):
-    # ... (keep existing results page code) ...
     page_widget = QWidget(parent_window)
     page_layout = QVBoxLayout(page_widget)
     page_layout.setContentsMargins(15, 15, 15, 15)
     page_layout.setSpacing(15)
     page_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-    # Icons
-    save_icon = _load_icon(parent_window.icon_path, "save.png", parent_window.icon_size)
-    folder_icon = _load_icon(parent_window.icon_path, "folder.png", parent_window.icon_size)
+    # Icons loaded using resolved path
+    save_icon = _load_icon(parent_window.icon_path, "save.png")
+    folder_icon = _load_icon(parent_window.icon_path, "folder.png")
 
     # --- Summary Section ---
     summary_group = QGroupBox("Performance Summary")
@@ -320,7 +316,7 @@ def create_results_page(parent_window):
     # Save Report Button
     parent_window.save_report_button = QPushButton("Save Report")
     if save_icon: parent_window.save_report_button.setIcon(save_icon)
-    parent_window.save_report_button.setIconSize(parent_window.icon_size)
+    parent_window.save_report_button.setIconSize(parent_window.icon_size) # Set size
     parent_window.save_report_button.setFont(parent_window.font_default)
     parent_window.save_report_button.clicked.connect(parent_window._save_report)
     parent_window.save_report_button.setFixedHeight(35)
@@ -329,7 +325,7 @@ def create_results_page(parent_window):
     # Open Folder Button
     parent_window.open_folder_button = QPushButton("Open Recordings Folder")
     if folder_icon: parent_window.open_folder_button.setIcon(folder_icon)
-    parent_window.open_folder_button.setIconSize(parent_window.icon_size)
+    parent_window.open_folder_button.setIconSize(parent_window.icon_size) # Set size
     parent_window.open_folder_button.setFont(parent_window.font_default)
     parent_window.open_folder_button.clicked.connect(parent_window._open_recordings_folder)
     parent_window.open_folder_button.setFixedHeight(35)

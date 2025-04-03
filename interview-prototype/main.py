@@ -2,7 +2,9 @@
 import sys
 import os
 import queue
-import shutil # <-- Import shutil for removing directories
+import shutil
+import platform       # <<< ADDED
+import subprocess     # <<< ADDED
 
 # --- PyQt6 Imports ---
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -12,19 +14,41 @@ from PyQt6.QtCore import Qt
 from core import logic
 from core import recording # Import recording module
 from core import tts       # Import tts module (NEW Facade)
-# MODIFIED: Import the constant
+# RECORDINGS_DIR is now the absolute user path from core.recording
 from core.recording import RECORDINGS_DIR
 from ui.main_window import InterviewApp
 
+# --- Helper Function for Resource Paths --- <<< ADDED START
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+        # Adjust path for one-file vs one-dir mode if needed (often not needed for simple data)
+        # base_path = os.path.join(base_path, '..') # Example if data is outside MEIPASS
+    except AttributeError:
+        # Not running bundled, use normal path relative to main.py script
+        base_path = os.path.abspath(os.path.dirname(__file__))
+    except Exception as e:
+        # Fallback or error logging
+        print(f"Resource Path Warning: Could not determine base path: {e}")
+        base_path = os.path.abspath(os.path.dirname(__file__))
+
+
+    return os.path.join(base_path, relative_path)
+# --- Helper Function for Resource Paths --- <<< ADDED END
+
 # --- Constants ---
-ICON_PATH = "icons"
-QSS_FILE = os.path.join("ui", "styles.qss") # Path to the QSS file
+# Use the helper function for bundled resources
+ICON_PATH = resource_path("icons")           # <<< MODIFIED
+QSS_FILE = resource_path(os.path.join("ui", "styles.qss")) # <<< MODIFIED
 
 # --- Function to load Stylesheet ---
 def load_stylesheet(filepath):
     """Loads QSS data from a file."""
+    # Filepath is already resolved by resource_path when QSS_FILE is defined
     try:
-        with open(filepath, "r") as f:
+        with open(filepath, "r", encoding="utf-8") as f: # Specify encoding
             return f.read()
     except FileNotFoundError:
         print(f"Warning: Stylesheet file not found at '{filepath}'. Using default styles.")
@@ -35,9 +59,11 @@ def load_stylesheet(filepath):
 
 # --- Function to Clear Recordings Folder ---
 def clear_recordings_folder():
-    """Deletes all files and subdirectories within the RECORDINGS_DIR."""
-    folder_path = os.path.abspath(RECORDINGS_DIR)
+    """Deletes all files and subdirectories within the user's RECORDINGS_DIR."""
+    # RECORDINGS_DIR should now be an absolute user path from core/recording.py
+    folder_path = RECORDINGS_DIR # <<< Use the (now absolute) path directly
     print(f"Checking recordings folder for cleanup: {folder_path}")
+
     if not os.path.isdir(folder_path):
         print("Recordings folder does not exist, no cleanup needed.")
         return
@@ -62,14 +88,32 @@ def clear_recordings_folder():
     else:
         print("Errors occurred during recordings folder cleanup.")
         # Optionally show a non-critical warning message box
-        QMessageBox.warning(None, "Cleanup Warning",
-                            f"Could not delete all items in the '{RECORDINGS_DIR}' folder.\n"
-                            "Check file permissions or if files are in use.")
+        # Avoid showing GUI elements before QApplication is fully running
+        # QMessageBox.warning(None, "Cleanup Warning", ...)
+
+
+# --- ADDED: Check for ffmpeg ---
+def check_ffmpeg():
+    """Checks if ffmpeg is accessible in the system PATH."""
+    cmd = "ffmpeg" if platform.system() != "Windows" else "ffmpeg.exe"
+    try:
+        # Use subprocess.run with DEVNULL to suppress output
+        subprocess.run([cmd, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        print("ffmpeg check: Found and accessible.")
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        print("ffmpeg check: Not found or inaccessible in system PATH.")
+        return False
+    except Exception as e:
+        print(f"ffmpeg check: Error during check - {e}")
+        return False
+# --- END ADDED ---
 
 
 # --- Main Execution ---
 if __name__ == "__main__":
     # Initial checks...
+    # Use os.path.exists on the resolved path
     if not os.path.exists(ICON_PATH): print(f"Warning: Icon folder '{ICON_PATH}' not found.")
 
     # Configure Gemini first (critical) - Uses keyring now
@@ -78,33 +122,45 @@ if __name__ == "__main__":
         temp_app = QApplication.instance()
         if temp_app is None: temp_app = QApplication(sys.argv)
         QMessageBox.critical(None, "Fatal Error",
-                             "Failed to configure Gemini API.\n" # MODIFIED Message
+                             "Failed to configure Gemini API.\n"
                              "Please ensure the API key is stored correctly in your system's keyring\n"
                              f"(Service: '{logic.KEYRING_SERVICE_NAME_GEMINI}', Username: '{logic.KEYRING_USERNAME_GEMINI}').\n"
                              "Check console output for details. Application will now exit.")
         sys.exit(1)
 
+
     # Create the main application instance
     q_app = QApplication(sys.argv)
 
+    # --- ADDED: Show FFMPEG Warning ---
+    # if not check_ffmpeg():
+    #      QMessageBox.warning(None, "Dependency Warning",
+    #                          "ffmpeg was not found in your system's PATH.\n\n"
+    #                          "The OpenAI TTS feature requires ffmpeg for audio decoding.\n\n"
+    #                          "Please install ffmpeg (from ffmpeg.org or via a package manager like Homebrew, Chocolatey, apt) and ensure it's added to your PATH environment variable.")
+    # # --- END ADDED ---
+
+
     # --- PERFORM RECORDINGS CLEANUP ---
-    clear_recordings_folder()
-    # --- END RECORDINGS CLEANUP ---
+    # Ensure RECORDINGS_DIR (now absolute user path) exists
+    try:
+        if os.path.exists(RECORDINGS_DIR):
+            clear_recordings_folder()
+        else:
+            os.makedirs(RECORDINGS_DIR, exist_ok=True) # Create if doesn't exist
+            print(f"Created recordings directory: {RECORDINGS_DIR}")
+    except OSError as e:
+        print(f"Warning: Could not create or clear recordings directory '{RECORDINGS_DIR}': {e}")
+        QMessageBox.warning(None, "Directory Warning", f"Could not create or clear recordings directory:\n{RECORDINGS_DIR}\n\nAudio/Video recording and saving might fail.")
+
 
     # --- LOAD AND APPLY THE STYLESHEET ---
-    style_sheet_content = load_stylesheet(QSS_FILE)
+    style_sheet_content = load_stylesheet(QSS_FILE) # QSS_FILE is already resolved
     if style_sheet_content:
         q_app.setStyleSheet(style_sheet_content)
     # ------------------------------------
 
-    # --- REMOVED .env check ---
-    # if not os.path.exists(".env"):
-    #      QMessageBox.warning(None, "Configuration Warning",
-    #                          f"'.env' file not found in the project directory.\n"
-    #                          "Make sure it exists and contains your GOOGLE_API_KEY.")
-
     # --- Microphone Check ---
-    # (Mic check logic remains the same)
     stt_backend_found = False
     audio_lib = "Not Checked"
     mic_warning_message = ""
@@ -121,15 +177,21 @@ if __name__ == "__main__":
             import pyaudio
             p = pyaudio.PyAudio(); input_devices_found = False
             try:
-                if p.get_default_input_device_info()['maxInputChannels'] > 0: input_devices_found = True
+                # Check default device first
+                default_info = p.get_default_input_device_info()
+                if default_info['maxInputChannels'] > 0:
+                    input_devices_found = True
+                    print(f"Audio Input Check: Found default PyAudio input device: {default_info.get('name')}")
             except IOError:
-                 print("Audio Input Check: Default PyAudio device failed, checking all devices...")
+                 print("Audio Input Check: No default PyAudio device found or error querying, checking all devices...")
                  for i in range(p.get_device_count()):
                      try:
-                         if p.get_device_info_by_index(i).get('maxInputChannels', 0) > 0:
-                             input_devices_found = True; print(f"Audio Input Check: Found PyAudio input device at index {i}."); break
+                         dev_info = p.get_device_info_by_index(i)
+                         if dev_info.get('maxInputChannels', 0) > 0:
+                             input_devices_found = True; print(f"Audio Input Check: Found PyAudio input device at index {i}: {dev_info.get('name')}."); break
                      except Exception as dev_e: print(f"Audio Input Check: Error checking PyAudio device {i}: {dev_e}")
             finally: p.terminate()
+
             if input_devices_found: stt_backend_found = True; audio_lib = "PyAudio"
             else:
                 if mic_warning_message: mic_warning_message += "\n"
@@ -137,15 +199,17 @@ if __name__ == "__main__":
         except Exception as e_pa:
             if mic_warning_message: mic_warning_message += "\n"
             mic_warning_message += f"PyAudio check also failed: {e_pa}"
+
     if not stt_backend_found:
-        full_warning = f"Could not detect a functioning microphone.\n\nDetails:\n{mic_warning_message}\n\nSpeech input will likely not function."
+        full_warning = f"Could not detect a functioning microphone.\n\nDetails:\n{mic_warning_message}\n\nSpeech input (STT) will likely not function."
         QMessageBox.warning(None, "Audio Input Warning", full_warning)
     else:
         print(f"Audio Input Check: Found input devices via {audio_lib}.")
     # --- End Microphone Check ---
 
     # Create and show the main window
-    app_window = InterviewApp(icon_path=ICON_PATH)
+    # Pass the resolved ICON_PATH
+    app_window = InterviewApp(icon_path=ICON_PATH) # <<< MODIFIED
     app_window.show()
 
     # Start the Qt event loop
