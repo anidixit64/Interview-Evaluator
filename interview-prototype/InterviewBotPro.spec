@@ -125,7 +125,7 @@ app = BUNDLE(
         'CFBundleVersion': '1.0.0', # CHANGE as needed
         'CFBundleShortVersionString': '1.0', # CHANGE as needed
         # !!! IMPORTANT: Replace 'Your Name/Company' !!!
-        'NSHumanReadableCopyright': 'Copyright © 2024 Your Name/Company. All rights reserved.'
+        'NSHumanReadableCopyright': 'Copyright © 2024 Ethan Justice. All rights reserved.'
     },
     entitlements_file=entitlements, # Set the entitlements file path
 )
