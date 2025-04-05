@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QLabel, QSizePolicy, QFrame
 )
 from PyQt6.QtGui import QFont, QPalette, QColor, QTextCursor, QCursor, QIcon, QPixmap, QDesktopServices
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QUrl
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QUrl # Keep pyqtSignal import if defining *new* signals
 
 # --- Project Imports ---
 try:
@@ -33,8 +33,8 @@ except ImportError:
 from .setup_page import SetupPage
 from .interview_page import InterviewPage
 from .results_page import ResultsPage
-# Import helpers if still needed directly (e.g., if _load_icon was used here)
-# from .components import _load_icon
+# Import constants from results_page for use in save_report
+from .results_page import FIXED_SPEECH_DESCRIPTION, FIXED_SPEECH_SCORE, FIXED_CONTENT_SCORE
 
 
 class InterviewApp(QWidget):
@@ -46,6 +46,10 @@ class InterviewApp(QWidget):
     SETUP_PAGE_INDEX = 0
     INTERVIEW_PAGE_INDEX = 1
     RESULTS_PAGE_INDEX = 2
+
+    # --- IF YOU NEED TO DEFINE *NEW* SIGNALS FOR THIS WINDOW, DO IT HERE ---
+    # Example:
+    # interview_started_signal = pyqtSignal(str) # Emits resume filename when started
 
     def __init__(self, icon_path, *args, **kwargs):
         """
@@ -256,6 +260,7 @@ class InterviewApp(QWidget):
         print("Navigating to Results Page...")
         # Display results using the results page's method
         if self.results_page_instance:
+            # The display_results method now handles both summary and assessment
             self.results_page_instance.display_results(summary, assessment)
         if self.stacked_widget: self.stacked_widget.setCurrentIndex(self.RESULTS_PAGE_INDEX)
         self._update_progress_indicator()
@@ -517,7 +522,8 @@ class InterviewApp(QWidget):
         if not self.interview_page_instance: return
         target_button = getattr(self.interview_page_instance, 'submit_button', None)
         if not target_button:
-            print("Warning: Submit button not found on interview page.")
+            # This might happen briefly during startup or shutdown
+            # print("Warning: Submit button not found on interview page during set_recording_button_state.")
             return
 
         target_icon = None
@@ -647,22 +653,24 @@ class InterviewApp(QWidget):
             # Determine if interview controls should generally be enabled
             # (i.e., not waiting for question, not currently processing answer)
             submit_btn = getattr(self.interview_page_instance, 'submit_button', None)
-            # Controls enabled if submit button *would be* enabled in idle state AND not currently recording
-            controls_enabled = submit_btn and submit_btn.isEnabled() and not self.is_recording
+            # Controls enabled if submit button *is currently* enabled AND not currently recording
+            # Note: button might be disabled by processing state, check that too.
+            controls_generally_active = submit_btn and submit_btn.isEnabled() and not self.is_recording
 
             # Set read-only based on input mode
             answer_input_widget.setReadOnly(not is_text_mode)
             # Set enabled state based on mode AND whether controls are generally active
-            answer_input_widget.setEnabled(is_text_mode and controls_enabled)
+            # Input field should be disabled if not in text mode OR if controls are generally inactive
+            answer_input_widget.setEnabled(is_text_mode and controls_generally_active)
 
             # Update placeholder text and focus
-            if is_text_mode and controls_enabled:
+            if is_text_mode and controls_generally_active:
                 answer_input_widget.setFocus()
                 answer_input_widget.setPlaceholderText("Type your answer here...")
             elif not is_text_mode: # Speech input mode
                 answer_input_widget.clear() # Clear any typed text when switching to speech
                 answer_input_widget.setPlaceholderText("Click 'Record Answer' to speak...")
-            else: # Text mode, but controls are disabled (e.g., waiting for question)
+            else: # Text mode, but controls are disabled (e.g., waiting for question/processing)
                  answer_input_widget.setPlaceholderText("Waiting for question or processing...")
 
     def select_resume_file(self):
@@ -977,14 +985,14 @@ class InterviewApp(QWidget):
 
         # Add styled Q&A to the transcript view on the interview page
         self.add_to_history(f"Q: {last_q}\n", tag="question_style")
-        self.add_to_history(f"A: {user_answer}\n\n", tag="answer_style")
+        self.add_to_history(f"A: {user_answer}\n\n", tag="answer_style") # Updates widget via page instance
 
         # Clear the answer input field
         answer_input_widget = getattr(self.interview_page_instance, 'answer_input', None)
         if answer_input_widget: answer_input_widget.clear()
 
         # Disable controls while generating the next response
-        self.disable_interview_controls()
+        self.disable_interview_controls() # Disables controls via page instance
         self.update_status("Generating response from interviewer...", True)
         QApplication.processEvents()
 
@@ -1035,23 +1043,52 @@ class InterviewApp(QWidget):
     def _save_report(self):
         """Slot triggered by the 'Save Report' button on the results page."""
         # Get text content from the results page widgets
-        summary_widget = getattr(self.results_page_instance, 'summary_text_results', None)
-        assessment_widget = getattr(self.results_page_instance, 'assessment_text_results', None)
-        if not (summary_widget and assessment_widget):
-             self.show_message_box("warning", "No Data", "Results widgets not found.")
-             return
-
-        summary = summary_widget.toPlainText().strip()
-        assessment = assessment_widget.toPlainText().strip()
-        if not summary and not assessment:
-            self.show_message_box("warning", "No Data", "Results content is empty, nothing to save.")
+        if not self.results_page_instance:
+            self.show_message_box("warning", "Internal Error", "Results page not found.")
             return
 
-        # Format the report content
+        content_widget = getattr(self.results_page_instance, 'content_score_text_edit', None)
+        job_fit_widget = getattr(self.results_page_instance, 'job_fit_text_edit', None)
+
+        # Fetch dynamic content (handling cases where widgets might be missing)
+        # Use toMarkdown() to preserve formatting if needed, otherwise toPlainText()
+        content_analysis = content_widget.toMarkdown().strip() if content_widget else "N/A"
+        job_fit_analysis = job_fit_widget.toMarkdown().strip() if job_fit_widget else "N/A"
+
+        # Remove the prepended title we added in display_results for the report
+        # Do this *before* checking if content is "N/A"
+        content_prefix = "**Content Analysis (Summary):**\n\n"
+        if content_analysis.startswith(content_prefix):
+            content_analysis = content_analysis[len(content_prefix):]
+
+        # Check if there's anything substantial *dynamic* to save
+        # We always include the fixed speech score/desc now
+        if content_analysis == "N/A" and job_fit_analysis == "N/A":
+            # Check if the placeholders are still there
+             placeholder_summary_check = "*Content analysis will appear here based on the interview summary.*"
+             placeholder_assessment_check = "*Job fit assessment will appear here.*"
+             is_content_placeholder = content_widget and content_widget.toPlainText().strip() == placeholder_summary_check
+             is_jobfit_placeholder = job_fit_widget and job_fit_widget.toPlainText().strip() == placeholder_assessment_check
+             if is_content_placeholder and is_jobfit_placeholder:
+                 self.show_message_box("warning", "No Data", "Results have not been generated yet, nothing to save.")
+                 return
+
+
+        # --- Format the report content ---
+        # Use the imported fixed values and fetched dynamic content
         report_content = (
             f"Interview Report\n{'='*16}\n\n"
-            f"Performance Summary\n{'-'*19}\n{summary}\n\n"
-            f"Qualification Assessment\n{'-'*24}\n{assessment}\n"
+            f"Speech Delivery Score: {FIXED_SPEECH_SCORE}%\n"
+            f"{'-'*23}\n"
+            # Basic markdown removal for plain text report
+            f"{FIXED_SPEECH_DESCRIPTION.replace('**', '').replace('*', '')}\n\n"
+            f"Response Content Score: {FIXED_CONTENT_SCORE}%\n"
+            f"{'-'*24}\n"
+            # Clean dynamic content as well
+            f"{content_analysis.replace('**', '').replace('*', '')}\n\n"
+            f"Job Fit Analysis\n"
+            f"{'-'*16}\n"
+            f"{job_fit_analysis.replace('**', '').replace('*', '')}\n"
         )
 
         # Suggest a default filename based on the resume filename
@@ -1082,7 +1119,7 @@ class InterviewApp(QWidget):
         if filepath: # User selected a file path
             try:
                 with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(report_content)
+                    f.write(report_content) # Write the cleaned plain text
                 self.update_status(f"Report saved to {os.path.basename(filepath)}.")
                 self.show_message_box("info", "Report Saved", f"Interview report saved successfully to:\n{filepath}")
             except Exception as e:
@@ -1164,7 +1201,9 @@ class InterviewApp(QWidget):
         # This is a placeholder for potentially more robust cleanup.
         if self.is_recording:
             print("Signalling recording thread to stop (if implemented)...")
-            # recording.stop_recording_flag.set() # Example if using an Event flag
+            # Example if using an Event flag:
+            # if hasattr(recording, 'stop_recording_flag'):
+            #     recording.stop_recording_flag.set()
 
         print("Main window cleanup attempts complete.")
         event.accept() # Allow the window to close

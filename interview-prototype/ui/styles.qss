@@ -68,4 +68,34 @@ QLabel#statusBar {
 }
 
 
+QTextEdit#scoreDescriptionEdit {
+    background-color: #303030; /* Slightly different background */
+    border: 1px solid #444444;
+    padding: 5px;
+    border-radius: 6px; /* Slightly rounded corners */
+}
+
+/* --- Style for the score description text edit (Optional) --- */
+QTextEdit#scoreDescriptionEdit {
+    background-color: #303030; /* Slightly different background */
+    border: 1px solid #444444;
+    padding: 5px;
+    border-radius: 6px; /* Slightly rounded corners */
+}
+
+/* --- (Keep existing styles for progressIndicator, statusBar etc.) --- */
+QLabel#progressIndicator {
+    color: #AAAAAA; /* Color for non-active steps */
+    font-weight: normal;
+    padding: 5px;
+}
+QLabel#statusBar {
+    color: #E0E0E0;
+    background-color: #1E1E1E;
+    padding: 4px 8px;
+    border-top: 1px solid #555555;
+    min-height: 18px;
+}
+
+
 /* Checkboxes use default theme style */
