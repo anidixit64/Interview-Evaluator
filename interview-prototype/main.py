@@ -1,10 +1,9 @@
-# main.py
 import sys
 import os
 import queue
 import shutil
-import platform       # <<< ADDED
-import subprocess     # <<< ADDED
+import platform
+import subprocess
 
 # --- PyQt6 Imports ---
 from PyQt6.QtWidgets import QApplication, QMessageBox
@@ -18,14 +17,12 @@ from core import tts       # Import tts module (NEW Facade)
 from core.recording import RECORDINGS_DIR
 from ui.main_window import InterviewApp
 
-# --- Helper Function for Resource Paths --- <<< ADDED START
+# --- Helper Function for Resource Paths ---
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
-        # Adjust path for one-file vs one-dir mode if needed (often not needed for simple data)
-        # base_path = os.path.join(base_path, '..') # Example if data is outside MEIPASS
     except AttributeError:
         # Not running bundled, use normal path relative to main.py script
         base_path = os.path.abspath(os.path.dirname(__file__))
@@ -34,14 +31,12 @@ def resource_path(relative_path):
         print(f"Resource Path Warning: Could not determine base path: {e}")
         base_path = os.path.abspath(os.path.dirname(__file__))
 
-
     return os.path.join(base_path, relative_path)
-# --- Helper Function for Resource Paths --- <<< ADDED END
 
 # --- Constants ---
 # Use the helper function for bundled resources
-ICON_PATH = resource_path("icons")           # <<< MODIFIED
-QSS_FILE = resource_path(os.path.join("ui", "styles.qss")) # <<< MODIFIED
+ICON_PATH = resource_path("icons")
+QSS_FILE = resource_path(os.path.join("ui", "styles.qss"))
 
 # --- Function to load Stylesheet ---
 def load_stylesheet(filepath):
@@ -60,8 +55,7 @@ def load_stylesheet(filepath):
 # --- Function to Clear Recordings Folder ---
 def clear_recordings_folder():
     """Deletes all files and subdirectories within the user's RECORDINGS_DIR."""
-    # RECORDINGS_DIR should now be an absolute user path from core/recording.py
-    folder_path = RECORDINGS_DIR # <<< Use the (now absolute) path directly
+    folder_path = RECORDINGS_DIR # Use the absolute path directly
     print(f"Checking recordings folder for cleanup: {folder_path}")
 
     if not os.path.isdir(folder_path):
@@ -87,12 +81,8 @@ def clear_recordings_folder():
         print("Recordings folder contents cleared successfully.")
     else:
         print("Errors occurred during recordings folder cleanup.")
-        # Optionally show a non-critical warning message box
-        # Avoid showing GUI elements before QApplication is fully running
-        # QMessageBox.warning(None, "Cleanup Warning", ...)
 
-
-# --- ADDED: Check for ffmpeg ---
+# --- Check for ffmpeg ---
 def check_ffmpeg():
     """Checks if ffmpeg is accessible in the system PATH."""
     cmd = "ffmpeg" if platform.system() != "Windows" else "ffmpeg.exe"
@@ -107,20 +97,18 @@ def check_ffmpeg():
     except Exception as e:
         print(f"ffmpeg check: Error during check - {e}")
         return False
-# --- END ADDED ---
-
 
 # --- Main Execution ---
 if __name__ == "__main__":
     # Initial checks...
-    # Use os.path.exists on the resolved path
-    if not os.path.exists(ICON_PATH): print(f"Warning: Icon folder '{ICON_PATH}' not found.")
+    if not os.path.exists(ICON_PATH):
+        print(f"Warning: Icon folder '{ICON_PATH}' not found.")
 
-    # Configure Gemini first (critical) - Uses keyring now
+    # Configure Gemini first (critical)
     if not logic.configure_gemini():
-        # Initialize QApplication temporarily just to show the critical message box
         temp_app = QApplication.instance()
-        if temp_app is None: temp_app = QApplication(sys.argv)
+        if temp_app is None:
+            temp_app = QApplication(sys.argv)
         QMessageBox.critical(None, "Fatal Error",
                              "Failed to configure Gemini API.\n"
                              "Please ensure the API key is stored correctly in your system's keyring\n"
@@ -132,17 +120,16 @@ if __name__ == "__main__":
     # Create the main application instance
     q_app = QApplication(sys.argv)
 
-    # --- ADDED: Show FFMPEG Warning ---
+    # Optional FFMPEG Warning (Commented out, enable if strictly needed)
     # if not check_ffmpeg():
     #      QMessageBox.warning(None, "Dependency Warning",
     #                          "ffmpeg was not found in your system's PATH.\n\n"
     #                          "The OpenAI TTS feature requires ffmpeg for audio decoding.\n\n"
-    #                          "Please install ffmpeg (from ffmpeg.org or via a package manager like Homebrew, Chocolatey, apt) and ensure it's added to your PATH environment variable.")
-    # # --- END ADDED ---
+    #                          "Please install ffmpeg and ensure it's added to your PATH.")
 
 
     # --- PERFORM RECORDINGS CLEANUP ---
-    # Ensure RECORDINGS_DIR (now absolute user path) exists
+    # Ensure RECORDINGS_DIR (absolute user path) exists
     try:
         if os.path.exists(RECORDINGS_DIR):
             clear_recordings_folder()
@@ -155,7 +142,7 @@ if __name__ == "__main__":
 
 
     # --- LOAD AND APPLY THE STYLESHEET ---
-    style_sheet_content = load_stylesheet(QSS_FILE) # QSS_FILE is already resolved
+    style_sheet_content = load_stylesheet(QSS_FILE)
     if style_sheet_content:
         q_app.setStyleSheet(style_sheet_content)
     # ------------------------------------
@@ -167,7 +154,8 @@ if __name__ == "__main__":
     try:
         import sounddevice as sd
         if sd.query_devices(kind='input'):
-            stt_backend_found = True; audio_lib = "sounddevice"
+            stt_backend_found = True
+            audio_lib = "sounddevice"
         else:
             mic_warning_message = "No input devices found via sounddevice."
             raise ImportError("No input devices found by sounddevice, trying PyAudio.")
@@ -175,9 +163,9 @@ if __name__ == "__main__":
         print(f"Audio Input Check: sounddevice failed ({e_sd}). Trying PyAudio...")
         try:
             import pyaudio
-            p = pyaudio.PyAudio(); input_devices_found = False
+            p = pyaudio.PyAudio()
+            input_devices_found = False
             try:
-                # Check default device first
                 default_info = p.get_default_input_device_info()
                 if default_info['maxInputChannels'] > 0:
                     input_devices_found = True
@@ -188,16 +176,24 @@ if __name__ == "__main__":
                      try:
                          dev_info = p.get_device_info_by_index(i)
                          if dev_info.get('maxInputChannels', 0) > 0:
-                             input_devices_found = True; print(f"Audio Input Check: Found PyAudio input device at index {i}: {dev_info.get('name')}."); break
-                     except Exception as dev_e: print(f"Audio Input Check: Error checking PyAudio device {i}: {dev_e}")
-            finally: p.terminate()
+                             input_devices_found = True
+                             print(f"Audio Input Check: Found PyAudio input device at index {i}: {dev_info.get('name')}.")
+                             break
+                     except Exception as dev_e:
+                         print(f"Audio Input Check: Error checking PyAudio device {i}: {dev_e}")
+            finally:
+                p.terminate()
 
-            if input_devices_found: stt_backend_found = True; audio_lib = "PyAudio"
+            if input_devices_found:
+                stt_backend_found = True
+                audio_lib = "PyAudio"
             else:
-                if mic_warning_message: mic_warning_message += "\n"
+                if mic_warning_message:
+                    mic_warning_message += "\n"
                 mic_warning_message += "No input devices found via PyAudio."
         except Exception as e_pa:
-            if mic_warning_message: mic_warning_message += "\n"
+            if mic_warning_message:
+                mic_warning_message += "\n"
             mic_warning_message += f"PyAudio check also failed: {e_pa}"
 
     if not stt_backend_found:
@@ -209,7 +205,7 @@ if __name__ == "__main__":
 
     # Create and show the main window
     # Pass the resolved ICON_PATH
-    app_window = InterviewApp(icon_path=ICON_PATH) # <<< MODIFIED
+    app_window = InterviewApp(icon_path=ICON_PATH)
     app_window.show()
 
     # Start the Qt event loop

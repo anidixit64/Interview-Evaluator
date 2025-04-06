@@ -180,4 +180,70 @@ QLabel.evidenceText { /* Allow styling by class if needed */
     margin-left: 5px;
 }
 
+/* --- Style for the Resume List --- */
+QListWidget#resumeList {
+    border: 1px solid #555555;
+    background-color: #303030; /* Slightly different bg */
+    border-radius: 6px;
+    padding: 3px;
+    outline: 0; /* Remove focus outline if desired */
+}
+QListWidget#resumeList::item {
+    padding: 5px 8px; /* Spacing within items */
+    border-bottom: 1px solid #404040; /* Separator */
+    color: #E0E0E0; /* Text color */
+}
+QListWidget#resumeList::item:last-child {
+    border-bottom: none; /* No separator for last item */
+}
+/* Style for selected item */
+QListWidget#resumeList::item:selected {
+    background-color: #4285F4; /* Selection color (e.g., Google Blue) */
+    color: white;
+    border-radius: 3px; /* Slightly round selected item */
+    border-bottom-color: transparent; /* Hide separator below selected */
+}
+/* Style for hovered item (non-selected) */
+QListWidget#resumeList::item:!selected:hover {
+    background-color: #4A4A4A; /* Hover color */
+     border-radius: 3px;
+}
+
+QScrollArea#jdScrollArea {
+    border: 1px solid #444444
+    background-color: #2E2E2E
+    border-radius: 6px
+    min-height: 60px /* Adjust as needed */
+}
+
+/* --- Style for individual JD Widgets --- */
+QFrame#jdEntryWidget {
+    background-color: #383838
+    border: 1px solid #484848
+    border-radius: 4px
+}
+QFrame#jdEntryWidget:hover {
+    background-color: #4A4A4A
+}
+QFrame#jdEntryWidget[selected="true"] {
+     background-color: #007ACC /* Different selection color for JDs? */
+     border: 1px solid #3399DD
+}
+QFrame#jdEntryWidget[selected="true"] QLabel#jdNameLabel {
+    color: white
+}
+QLabel#jdNameLabel {
+    color: #E0E0E0
+}
+
+/* --- Style for the JD Display Text Edit --- */
+QTextEdit#jdDisplayEdit {
+   border: 1px solid #555555
+   padding: 5px
+   background-color: #303030 /* Slightly darker/dimmer for read-only display */
+   color: #CCCCCC /* Dimmer text */
+   border-radius: 6px
+}
+
+
 /* Checkboxes use default theme style */

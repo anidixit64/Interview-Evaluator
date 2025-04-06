@@ -5,252 +5,318 @@ import queue
 import platform
 import subprocess
 import html
+import json
+import shutil
+from pathlib import Path
 
 # --- PyQt6 Imports ---
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog, QApplication, QStackedWidget,
-    QLabel, QSizePolicy, QFrame
+    QLabel, QSizePolicy, QFrame, QListWidgetItem, QInputDialog, QLineEdit
 )
 from PyQt6.QtGui import QFont, QPalette, QColor, QTextCursor, QCursor, QIcon, QPixmap, QDesktopServices
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QUrl
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QUrl, QStandardPaths
 
 # --- Project Imports ---
 try:
-    # Assume core is a sibling directory when running normally
     import core.logic as logic
-    from core import tts
-    from core import recording
+    from core import tts, recording
     from core.recording import RECORDINGS_DIR
 except ImportError:
-    # Fallback for running script directly from ui directory or issues
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
     import core.logic as logic
-    from core import tts
-    from core import recording
+    from core import tts, recording
     from core.recording import RECORDINGS_DIR
 
 # --- Import Page Classes & Constants ---
 from .setup_page import SetupPage
 from .interview_page import InterviewPage
-from .results_page import ResultsPage # Import RequirementWidget if needed? maybe not
-from .results_page import FIXED_SPEECH_DESCRIPTION, FIXED_SPEECH_SCORE # Removed FIXED_CONTENT_SCORE
+from .results_page import ResultsPage
+from .results_page import FIXED_SPEECH_DESCRIPTION, FIXED_SPEECH_SCORE
 
+# --- Constants ---
+CONFIG_FILE_NAME = "settings.json"
+RESUMES_SUBDIR = "resumes"
+MAX_RECENT_RESUMES = 10
+MAX_RECENT_JDS = 10
 
 class InterviewApp(QWidget):
-    """
-    Main application window for the Interview Bot Pro.
-    Manages the UI pages, application state, and core logic interactions.
-    """
-    # Constants for page indices
     SETUP_PAGE_INDEX = 0
     INTERVIEW_PAGE_INDEX = 1
     RESULTS_PAGE_INDEX = 2
 
-    # --- IF YOU NEED TO DEFINE *NEW* SIGNALS FOR THIS WINDOW, DO IT HERE ---
-    # Example:
-    # interview_started_signal = pyqtSignal(str) # Emits resume filename when started
-
     def __init__(self, icon_path, *args, **kwargs):
-        """
-        Initializes the InterviewApp.
-
-        Args:
-            icon_path (str): The absolute path to the icons directory.
-            *args: Variable length argument list for QWidget.
-            **kwargs: Arbitrary keyword arguments for QWidget.
-        """
         super().__init__(*args, **kwargs)
-        self.icon_path = icon_path # Store resolved path for pages to use
+        self.icon_path = icon_path
         self.setWindowTitle("Interview Bot Pro")
-        self.setGeometry(100, 100, 850, 1000) # Initial position and size
+        self.setGeometry(100, 100, 850, 1000)
 
-        self._setup_appearance()      # Apply custom styling/palette
-        self._load_assets()           # Load shared resources like fonts/sizes
-        self._init_state()            # Initialize application state variables
-        self._setup_ui()              # Create UI layout and page instances
-        self._update_ui_from_state()  # Set initial UI based on state
-        self._update_progress_indicator() # Set initial progress display
-        # Timer for checking Speech-to-Text results queue
+        self._setup_appearance()
+        self._load_assets()
+        self._init_state()
+        self._ensure_app_dirs_exist()
+        self.config = self._load_config()
+        self._setup_ui()
+        self._update_ui_from_state()
+        self._update_progress_indicator()
         self.stt_timer = QTimer(self)
         self.stt_timer.timeout.connect(self.check_stt_queue)
-        self.stt_timer.start(100) # Check every 100ms
+        self.stt_timer.start(100)
 
     def _setup_appearance(self):
-        """Sets the dark theme palette for the application."""
         palette = self.palette()
-        # Define colors for various UI roles
         palette.setColor(QPalette.ColorRole.Window, QColor(45, 45, 45))
         palette.setColor(QPalette.ColorRole.WindowText, QColor(220, 220, 220))
-        palette.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))        # Background for text inputs
-        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53)) # Used by some views
+        palette.setColor(QPalette.ColorRole.Base, QColor(35, 35, 35))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
         palette.setColor(QPalette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
         palette.setColor(QPalette.ColorRole.ToolTipText, QColor(50,50,50))
-        palette.setColor(QPalette.ColorRole.Text, QColor(220, 220, 220))     # Default text color
-        palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))      # Button background
+        palette.setColor(QPalette.ColorRole.Text, QColor(220, 220, 220))
+        palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
         palette.setColor(QPalette.ColorRole.ButtonText, QColor(220, 220, 220))
         palette.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
-        palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))      # Color for links
-        palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218)) # Selection background
-        palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black) # Selection text
-        # Disabled state colors
+        palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+        palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black)
         disabled_text_color = QColor(128, 128, 128)
         palette.setColor(QPalette.ColorRole.PlaceholderText, disabled_text_color)
         palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, disabled_text_color)
         palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, disabled_text_color)
-        # Apply the palette and style
         self.setPalette(palette)
-        QApplication.setStyle("Fusion") # Fusion style works well with custom palettes
+        QApplication.setStyle("Fusion")
 
     def _load_assets(self):
-        """Loads shared resources like fonts and icon sizes needed by pages."""
-        # Define shared sizes and fonts that pages can access via self.parent_window
         self.icon_size = QSize(20, 20)
         self.font_default = QFont("Arial", 10)
         self.font_bold = QFont("Arial", 10, QFont.Weight.Bold)
         self.font_small = QFont("Arial", 9)
         self.font_large_bold = QFont("Arial", 12, QFont.Weight.Bold)
-        self.font_history = QFont("Monospace", 9) # For transcript view
+        self.font_history = QFont("Monospace", 9)
 
     def _init_state(self):
-        """Initializes the application's state variables."""
-        # Configuration state
         self.pdf_filepath = None
         self.resume_content = ""
         self.job_description_text = ""
+        self.selected_jd_name = None
         self.num_topics = logic.DEFAULT_NUM_TOPICS
         self.max_follow_ups = logic.DEFAULT_MAX_FOLLOW_UPS
         self.use_speech_input = False
         self.use_openai_tts = False
-
-        # Interview progress state
         self.initial_questions = []
         self.cleaned_initial_questions = set()
         self.current_initial_q_index = -1
         self.current_topic_question = ""
-        self.current_topic_history = [] # History for the *current* topic (for follow-ups)
+        self.current_topic_history = []
         self.follow_up_count = 0
-        self.current_full_interview_history = [] # History of all Q&A pairs
-        self.is_recording = False # Flag for STT recording active
-        self.last_question_asked = "" # Store the text of the last question asked
-
-        # Page instances - will be created in _setup_ui
+        self.current_full_interview_history = []
+        self.is_recording = False
+        self.last_question_asked = ""
+        self.last_assessment_data = None
+        self.last_content_score_data = None
+        self.app_data_dir = self._get_app_data_dir()
+        self.config_path = self.app_data_dir / CONFIG_FILE_NAME
+        self.resumes_dir = self.app_data_dir / RESUMES_SUBDIR
+        self.config = {"recent_resumes": [], "recent_job_descriptions": []}
         self.setup_page_instance = None
         self.interview_page_instance = None
         self.results_page_instance = None
-
-        # Keep references to widgets directly part of the main window layout
         self.progress_indicator_label = None
         self.status_bar_label = None
         self.stacked_widget = None
-        self.last_assessment_data = None # Store structured assessment data
-        self.last_content_score_data = None # Store state for content score results
+
+    def _get_app_data_dir(self) -> Path:
+        app_data_dir_str = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+        if not app_data_dir_str:
+            app_data_dir_str = os.path.join(os.path.expanduser("~"), ".InterviewBotPro")
+            print(f"Warning: Could not get standard AppDataLocation. Using fallback: {app_data_dir_str}")
+        return Path(app_data_dir_str)
+
+    def _ensure_app_dirs_exist(self):
+        try:
+            self.app_data_dir.mkdir(parents=True, exist_ok=True)
+            self.resumes_dir.mkdir(parents=True, exist_ok=True)
+            print(f"Ensured app data directories exist: {self.app_data_dir}")
+        except OSError as e:
+            print(f"CRITICAL ERROR: Could not create app data directories: {e}")
+            self.show_message_box("error", "Directory Error", f"Could not create necessary application directories:\n{self.app_data_dir}\n\nResumes cannot be saved.")
+
+    def _load_config(self) -> dict:
+        default_config = {"recent_resumes": [], "recent_job_descriptions": []}
+        if not self.config_path.exists():
+            print(f"Config file not found at {self.config_path}. Using default.")
+            return default_config
+
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            needs_save = False
+
+            if not isinstance(config.get("recent_resumes"), list):
+                print("Warning: 'recent_resumes' in config is not a list. Resetting.")
+                config["recent_resumes"] = []
+                needs_save = True
+            else:
+                valid_resumes = []
+                for item in config.get("recent_resumes", []):
+                    if (isinstance(item, dict) and 'name' in item and 'path' in item):
+                        p = Path(item['path'])
+                        if p.is_absolute() and p.exists() and p.is_relative_to(self.resumes_dir):
+                            valid_resumes.append(item)
+                        else:
+                            needs_save = True
+                            print(f"Pruning invalid resume: {item}")
+                    else:
+                        needs_save = True
+                        print(f"Pruning malformed resume: {item}")
+                if len(valid_resumes) != len(config.get("recent_resumes", [])):
+                    config["recent_resumes"] = valid_resumes
+
+            if not isinstance(config.get("recent_job_descriptions"), list):
+                print("Warning: 'recent_job_descriptions' in config is not a list. Resetting.")
+                config["recent_job_descriptions"] = []
+                needs_save = True
+            else:
+                valid_jds = []
+                for item in config.get("recent_job_descriptions", []):
+                    if (isinstance(item, dict) and
+                            item.get("name") and isinstance(item["name"], str) and
+                            item.get("text") is not None and isinstance(item["text"], str)):
+                        valid_jds.append(item)
+                    else:
+                        needs_save = True
+                        print(f"Pruning malformed JD entry: {item}")
+                if len(valid_jds) != len(config.get("recent_job_descriptions", [])):
+                     config["recent_job_descriptions"] = valid_jds
+
+            if needs_save:
+                self._save_config(config)
+
+            return config
+        except json.JSONDecodeError as e:
+            print(f"Error decoding config file {self.config_path}: {e}. Using default.")
+            return default_config
+        except IOError as e:
+            print(f"Error reading config file {self.config_path}: {e}. Using default.")
+            return default_config
+        except Exception as e:
+             print(f"Unexpected error loading config: {e}. Using default.")
+             return default_config
+
+    def _save_config(self, config_data=None):
+        data_to_save = config_data if config_data is not None else self.config
+        try:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, indent=4)
+            print(f"Config saved to {self.config_path}")
+        except IOError as e:
+            print(f"Error saving config file {self.config_path}: {e}")
+        except TypeError as e:
+             print(f"Error serializing config data to JSON: {e}")
+
+    def _add_recent_resume(self, name: str, path_in_resumes_dir: str):
+        if not name or not path_in_resumes_dir:
+            return
+
+        p = Path(path_in_resumes_dir)
+        if not p.is_absolute() or not p.is_relative_to(self.resumes_dir):
+            print(f"Error: Attempted to add non-managed path: {path_in_resumes_dir}")
+            return
+
+        new_entry = {"name": name, "path": str(p)}
+        recent_list = self.config.get("recent_resumes", [])
+
+        existing_indices = [i for i, item in enumerate(recent_list) if item.get("path") == str(p)]
+        for i in reversed(existing_indices):
+            del recent_list[i]
+
+        recent_list.insert(0, new_entry)
+
+        self.config["recent_resumes"] = recent_list[:MAX_RECENT_RESUMES]
+        self._save_config()
+        self._update_ui_from_state()
+
+    def _add_recent_jd(self, name: str, text: str):
+        if not name or text is None:
+            return
+
+        new_entry = {"name": name, "text": text}
+        jd_list = self.config.get("recent_job_descriptions", [])
+
+        existing_indices = [i for i, item in enumerate(jd_list) if item.get("name") == name]
+        for i in reversed(existing_indices):
+            del jd_list[i]
+
+        jd_list.insert(0, new_entry)
+        self.config["recent_job_descriptions"] = jd_list[:MAX_RECENT_JDS]
+        self._save_config()
 
     def _setup_ui(self):
-        """Sets up the main window layout, stack widget, and page instances."""
         main_window_layout = QVBoxLayout(self)
-        main_window_layout.setContentsMargins(0, 0, 0, 0) # No margins for main layout
-        main_window_layout.setSpacing(0)                  # No spacing
-
-        # --- Progress Indicator (Top Bar) ---
+        main_window_layout.setContentsMargins(0, 0, 0, 0)
+        main_window_layout.setSpacing(0)
         self.progress_indicator_label = QLabel("...")
-        self.progress_indicator_label.setObjectName("progressIndicator") # For QSS styling
+        self.progress_indicator_label.setObjectName("progressIndicator")
         self.progress_indicator_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.progress_indicator_label.setTextFormat(Qt.TextFormat.RichText) # Allow HTML for styling active step
+        self.progress_indicator_label.setTextFormat(Qt.TextFormat.RichText)
         main_window_layout.addWidget(self.progress_indicator_label)
-
-        # --- Separator Line ---
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         main_window_layout.addWidget(line)
-
-        # --- Stacked Widget (Main Content Area) ---
         self.stacked_widget = QStackedWidget()
-        main_window_layout.addWidget(self.stacked_widget, stretch=1) # Allow stack to grow
-
-        # --- Instantiate Page Widgets ---
-        # Pass 'self' (the InterviewApp instance) to each page constructor.
-        # Pages can then access shared state, resources (fonts, icon_path), and methods.
+        main_window_layout.addWidget(self.stacked_widget, stretch=1)
         self.setup_page_instance = SetupPage(self)
         self.interview_page_instance = InterviewPage(self)
         self.results_page_instance = ResultsPage(self)
-
-        # --- Add Page Instances to the Stacked Widget ---
         self.stacked_widget.addWidget(self.setup_page_instance)
         self.stacked_widget.addWidget(self.interview_page_instance)
         self.stacked_widget.addWidget(self.results_page_instance)
-
-        # --- Status Bar (Bottom Bar) ---
         self.status_bar_label = QLabel("Ready.")
-        self.status_bar_label.setObjectName("statusBar") # For QSS styling
+        self.status_bar_label.setObjectName("statusBar")
         main_window_layout.addWidget(self.status_bar_label)
-
-        self.setLayout(main_window_layout) # Apply the main layout to the window
+        self.setLayout(main_window_layout)
 
     def _update_ui_from_state(self):
-        """
-        Updates all UI elements across pages to reflect the current application state.
-        Typically called after state changes (e.g., reset, loading).
-        """
         print("Updating UI from state...")
-        pdf_loaded = bool(self.pdf_filepath) # Check if a resume PDF is loaded
+        pdf_loaded = bool(self.pdf_filepath and Path(self.pdf_filepath).exists())
 
-        # Delegate state updates to each page instance
         if self.setup_page_instance:
-            self.setup_page_instance.update_widgets_from_state()
-            # Explicitly ensure the select button is enabled after state update
-            # (unless it should be disabled for other reasons, like generation in progress)
-            select_btn = getattr(self.setup_page_instance, 'select_btn', None)
-            if select_btn:
-                # Consider if start_interview_process is running? Assume not during this general update.
-                 select_btn.setEnabled(True)
+            recent_resumes_data = self.config.get("recent_resumes", [])
+            recent_jd_data = self.config.get("recent_job_descriptions", [])
+            self.setup_page_instance.update_widgets_from_state(
+                recent_resumes_data=recent_resumes_data,
+                current_selection_path=self.pdf_filepath,
+                recent_jd_data=recent_jd_data,
+                current_jd_name=self.selected_jd_name
+            )
 
         if self.interview_page_instance:
-            # Clear dynamic fields like question/answer/history on reset
             self.interview_page_instance.clear_fields()
-
         if self.results_page_instance:
-            # Clear results text areas on reset
             self.results_page_instance.clear_fields()
-
-        # Reset status bar message
         self.update_status("Ready.")
-        # Ensure the first page (Setup) is shown
         if self.stacked_widget:
             self.stacked_widget.setCurrentIndex(self.SETUP_PAGE_INDEX)
-        # Update the submit button state based on current settings (e.g., STT enabled/disabled)
         self.update_submit_button_text()
 
-    # --- Navigation and Progress Indication ---
-
     def _update_progress_indicator(self):
-        """Updates the top progress bar label to highlight the current step."""
         if not self.progress_indicator_label or not self.stacked_widget:
-             return # Widgets not ready yet
+             return
         current_index = self.stacked_widget.currentIndex()
         steps = ["Step 1: Setup", "Step 2: Interview", "Step 3: Results"]
-        progress_parts = []
-        for i, step in enumerate(steps):
-            if i == current_index:
-                # Use HTML/Rich Text for styling the active step
-                progress_parts.append(f'<font color="orange"><b>{step}</b></font>')
-            else:
-                progress_parts.append(step)
-        progress_text = " → ".join(progress_parts)
-        self.progress_indicator_label.setText(progress_text)
+        progress_parts = [f'<font color="orange"><b>{step}</b></font>' if i == current_index else step for i, step in enumerate(steps)]
+        self.progress_indicator_label.setText(" → ".join(progress_parts))
 
     def _go_to_setup_page(self):
-        """Navigates to the Setup page and performs a full reset."""
         print("Navigating to Setup Page and Resetting...")
-        self.reset_interview_state(clear_config=True) # Full reset including config
+        self.reset_interview_state(clear_config=True)
         if self.stacked_widget:
             self.stacked_widget.setCurrentIndex(self.SETUP_PAGE_INDEX)
-        self._update_progress_indicator() # Update progress display
+        self._update_progress_indicator()
 
     def _go_to_interview_page(self):
-        """Navigates to the Interview page, clearing relevant fields."""
         print("Navigating to Interview Page...")
-        # Clear dynamic fields on the interview page before showing it
         if self.interview_page_instance:
             self.interview_page_instance.clear_fields()
         if self.stacked_widget:
@@ -258,50 +324,32 @@ class InterviewApp(QWidget):
         self._update_progress_indicator()
         self.update_status("Interview started. Waiting for question...")
 
-    # --- MODIFIED ---
     def _go_to_results_page(self, summary: str | None, assessment_data: dict | None, content_score_data: dict | None):
-        """Navigates to the Results page and displays the generated results."""
         print("Navigating to Results Page...")
-        self.last_assessment_data = assessment_data # Store structured data
-        self.last_content_score_data = content_score_data # Store content score data
+        self.last_assessment_data = assessment_data
+        self.last_content_score_data = content_score_data
         if self.results_page_instance:
-            # Pass all data pieces to display_results
             self.results_page_instance.display_results(summary, assessment_data, content_score_data)
         if self.stacked_widget:
             self.stacked_widget.setCurrentIndex(self.RESULTS_PAGE_INDEX)
         self._update_progress_indicator()
         self.update_status("Interview complete. Results displayed.")
-    # --- END MODIFIED ---
-
-
-    # --- Helper Methods & State Management ---
 
     def show_message_box(self, level, title, message):
-        """Displays a modal message box."""
-        box = QMessageBox(self) # Parent to the main window
-        icon_map = {
-            "info": QMessageBox.Icon.Information,
-            "warning": QMessageBox.Icon.Warning,
-            "error": QMessageBox.Icon.Critical
-        }
+        box = QMessageBox(self)
+        icon_map = {"info": QMessageBox.Icon.Information, "warning": QMessageBox.Icon.Warning, "error": QMessageBox.Icon.Critical}
         box.setIcon(icon_map.get(level, QMessageBox.Icon.NoIcon))
         box.setWindowTitle(title)
         box.setText(message)
         box.setStandardButtons(QMessageBox.StandardButton.Ok)
-        box.exec() # Show modally
+        box.exec()
 
     def _adjust_value(self, value_type, amount):
-        """
-        Adjusts configuration values (topics, follow-ups) based on button clicks.
-        Updates both the internal state and the corresponding label on the setup page.
-        """
         current_val = 0
         min_val = 0
         max_val = 0
         target_label_widget = None
         target_var_name = ""
-
-        # Determine which value to adjust and get the corresponding label widget
         if value_type == 'topics' and self.setup_page_instance:
             target_label_widget = getattr(self.setup_page_instance, 'num_topics_label', None)
             current_val = self.num_topics
@@ -316,144 +364,102 @@ class InterviewApp(QWidget):
             target_var_name = 'max_follow_ups'
         else:
             print(f"Warning: Cannot adjust value. Type '{value_type}' or setup page instance not found.")
-            return # Cannot proceed if setup page or label isn't found
-
+            return
         new_value = current_val + amount
-
-        # Apply change if within limits
         if min_val <= new_value <= max_val:
-            setattr(self, target_var_name, new_value) # Update the state variable (e.g., self.num_topics)
+            setattr(self, target_var_name, new_value)
             if target_label_widget:
-                target_label_widget.setText(str(new_value)) # Update the visual label
+                target_label_widget.setText(str(new_value))
             print(f"{target_var_name.replace('_',' ').title()} set to: {new_value}")
         else:
             print(f"Value {new_value} for {value_type} out of bounds ({min_val}-{max_val})")
 
     def update_status(self, message, busy=False):
-        """Updates the bottom status bar text and optionally shows a busy cursor."""
         if self.status_bar_label:
             self.status_bar_label.setText(message)
         if busy:
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         else:
             QApplication.restoreOverrideCursor()
-        QApplication.processEvents() # Ensure UI updates immediately
+        QApplication.processEvents()
 
     def display_question(self, question_text):
-        """
-        Displays the interviewer's question on the interview page and triggers TTS.
-        """
-        self.last_question_asked = question_text # Store for context
-        # Update the question text edit widget via the interview page instance
+        self.last_question_asked = question_text
         if self.interview_page_instance and hasattr(self.interview_page_instance, 'current_q_text'):
             self.interview_page_instance.current_q_text.setPlainText(question_text)
         else:
-            # Fallback if widget isn't ready - show in status bar
             self.update_status(f"Asking: {question_text[:30]}...")
-
-        # Speak the question using the configured TTS provider
         try:
             tts.speak_text(question_text)
         except Exception as e:
             print(f"TTS Error during speak_text call: {e}")
             self.show_message_box("warning", "TTS Error", f"Could not speak question: {e}")
-
-        # Enable controls for user to answer
         self.enable_interview_controls()
-
-        # Focus the answer input if not using speech input
         answer_input = getattr(self.interview_page_instance, 'answer_input', None)
         if answer_input and not self.use_speech_input:
             answer_input.setFocus()
 
     def add_to_history(self, text, tag=None):
-        """Adds text (question or answer) to the transcript view on the interview page."""
         if not self.interview_page_instance or not hasattr(self.interview_page_instance, 'history_text'):
             print("Warning: History text widget not found.")
-            return # Cannot add history if widget doesn't exist
-
+            return
         history_widget = self.interview_page_instance.history_text
         cursor = history_widget.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End) # Go to the end
+        cursor.movePosition(QTextCursor.MoveOperation.End)
         history_widget.setTextCursor(cursor)
-
-        # Determine text color based on application palette and tag
-        text_color_name = self.palette().color(QPalette.ColorRole.Text).name() # Default text color
-        # Escape HTML special characters and handle newlines for display
+        text_color_name = self.palette().color(QPalette.ColorRole.Text).name()
         escaped_text = html.escape(text).replace("\n", "<br>")
-
-        # Apply styling using simple HTML tags
         html_content = ""
         if tag == "question_style":
-            html_content = f'<font color="#569CD6">{escaped_text}</font>' # Blue for questions
+            html_content = f'<font color="#569CD6">{escaped_text}</font>'
         elif tag == "answer_style":
-            html_content = f'<font color="{text_color_name}">{escaped_text}</font>' # Default text color for answers
+            html_content = f'<font color="{text_color_name}">{escaped_text}</font>'
         elif tag == "topic_marker":
-            html_content = f'<font color="grey"><b>{escaped_text}</b></font>' # Grey and bold for separators
+            html_content = f'<font color="grey"><b>{escaped_text}</b></font>'
         else:
-            html_content = f'<font color="{text_color_name}">{escaped_text}</font>' # Default
-
-        history_widget.insertHtml(html_content) # Insert the styled HTML
-        history_widget.ensureCursorVisible()      # Scroll to the bottom
+            html_content = f'<font color="{text_color_name}">{escaped_text}</font>'
+        history_widget.insertHtml(html_content)
+        history_widget.ensureCursorVisible()
 
     def set_setup_controls_state(self, pdf_loaded):
-        """Delegates enabling/disabling controls on the setup page based on PDF load state."""
         if self.setup_page_instance:
             self.setup_page_instance.set_controls_enabled_state(pdf_loaded)
-        # Note: Disabling the 'Select Resume' button during question generation
-        # is handled directly in `start_interview_process`.
 
     def enable_interview_controls(self):
-        """Delegates enabling controls on the interview page."""
         if self.interview_page_instance:
             self.interview_page_instance.set_controls_enabled(True)
-            self.is_recording = False # Ensure recording flag is off
-            # Update button state to 'idle' (record or submit based on mode)
+            self.is_recording = False
             self.set_recording_button_state('idle')
 
     def disable_interview_controls(self, is_recording_stt=False):
-        """
-        Delegates disabling controls on the interview page.
-
-        Args:
-            is_recording_stt (bool): True if disabling is due to STT recording starting.
-        """
         if self.interview_page_instance:
             self.interview_page_instance.set_controls_enabled(False, is_recording_stt)
-            self.is_recording = is_recording_stt # Update recording flag
+            self.is_recording = is_recording_stt
 
     def reset_interview_state(self, clear_config=True):
-        """
-        Resets the application state, optionally clearing configuration.
-        Updates the UI to reflect the reset state.
-        """
         print(f"Resetting interview state (clear_config={clear_config})...")
         if clear_config:
-            # Reset configuration state
             self.pdf_filepath = None
             self.resume_content = ""
-            self.job_description_text = "" # Clear state variable
+            self.job_description_text = ""
+            self.selected_jd_name = None # Reset selected JD name
             self.num_topics = logic.DEFAULT_NUM_TOPICS
             self.max_follow_ups = logic.DEFAULT_MAX_FOLLOW_UPS
             self.use_speech_input = False
             self.use_openai_tts = False
-            # Reset TTS provider to default
             current_provider = tts.get_current_provider()
             default_provider = tts.DEFAULT_PROVIDER
             print(f"Resetting TTS. Current: {current_provider}, Default: {default_provider}")
             if current_provider != default_provider:
                 if not tts.set_provider(default_provider):
-                    # Try first available if default fails
                     potential = tts.get_potentially_available_providers()
                     fallback = potential[0] if potential else None
                     if fallback and tts.set_provider(fallback):
                         print(f"Reset TTS: Set to first available '{fallback}'.")
                     else:
-                        print("Reset TTS: ERROR - Could not set default or fallback TTS provider.")
+                        print("Reset TTS: ERROR - Could not set default or fallback.")
                 else:
                     print(f"Reset TTS: Set to default '{default_provider}'.")
-
-        # Always reset dynamic interview progress state
         self.initial_questions = []
         self.cleaned_initial_questions = set()
         self.current_initial_q_index = -1
@@ -463,20 +469,15 @@ class InterviewApp(QWidget):
         self.current_full_interview_history = []
         self.is_recording = False
         self.last_question_asked = ""
-        self.last_assessment_data = None # Reset stored assessment data
-        self.last_content_score_data = None # Reset stored content score data
-
-        # Update UI based on the reset state
-        self._update_ui_from_state() # This calls update methods on page instances
-        # Ensure interview controls are disabled after reset
+        self.last_assessment_data = None
+        self.last_content_score_data = None
+        self._update_ui_from_state()
         self.disable_interview_controls()
-        QApplication.restoreOverrideCursor() # Ensure normal cursor
+        QApplication.restoreOverrideCursor()
         print("Interview state reset complete.")
 
     def _clean_question_text(self, raw_q_text):
-        """Removes leading numbers/punctuation from generated questions for cleaner matching."""
         cleaned = raw_q_text.strip()
-        # Try removing "1.", "1)", "1 " etc.
         if cleaned and cleaned[0].isdigit():
             parts = cleaned.split('.', 1)
             if len(parts) > 1 and parts[0].isdigit():
@@ -487,99 +488,66 @@ class InterviewApp(QWidget):
             parts = cleaned.split(' ', 1)
             if len(parts) > 1 and parts[0].isdigit():
                 return parts[1].strip()
-        return cleaned # Return original cleaned text if no pattern matched
+        return cleaned
 
     def save_transcript_to_file(self):
-        """Saves the full interview transcript (Q&A) to a text file in the recordings directory."""
         if not self.current_full_interview_history:
             print("No history to save.")
             return
-        # Create a mapping from cleaned initial question text to its index for topic grouping
         if not self.initial_questions:
-            print("Warning: Initial questions missing, cannot accurately map topics in transcript.")
-            topic_index_map = {} # Proceed without mapping
+            print("Warning: Initial questions missing, cannot map topics.")
+            topic_index_map = {}
         else:
             topic_index_map = {self._clean_question_text(q): i for i, q in enumerate(self.initial_questions)}
-
         transcript_lines = []
-        last_topic_num = -1 # Track the last initial question number
-
+        last_topic_num = -1
         try:
             for qa_pair in self.current_full_interview_history:
                  q_raw = qa_pair.get('q', 'N/A')
                  a = qa_pair.get('a', 'N/A')
                  q_clean = self._clean_question_text(q_raw)
-                 # Find if the question matches one of the initial questions
                  topic_index = topic_index_map.get(q_clean, -1)
-
-                 if topic_index != -1: # It's an initial question
+                 if topic_index != -1:
                     current_topic_num = topic_index + 1
-                    # Add a separator if starting a new topic (and not the very first one)
                     if current_topic_num != last_topic_num and last_topic_num != -1:
-                        transcript_lines.append("\n-------------------------") # Separator
+                        transcript_lines.append("\n-------------------------")
                     transcript_lines.append(f"\nQuestion {current_topic_num}: {q_raw}\nAnswer: {a}")
                     last_topic_num = current_topic_num
-                 else: # It's a follow-up question
+                 else:
                     ctx = f"Topic {last_topic_num}" if last_topic_num > 0 else "General"
                     transcript_lines.append(f"\nFollow Up (re {ctx}): {q_raw}\nAnswer: {a}")
-
-            # Ensure user-specific directory exists (using absolute path from core.recording)
             os.makedirs(RECORDINGS_DIR, exist_ok=True)
             filepath = os.path.join(RECORDINGS_DIR, "transcript.txt")
             print(f"Saving transcript to {filepath}...")
-            # Join lines, ensuring they are stripped and filter empty ones
             final_transcript = "\n".join(line.strip() for line in transcript_lines if line.strip())
             with open(filepath, "w", encoding="utf-8") as f:
-                 f.write(final_transcript.strip() + "\n") # Add final newline
+                 f.write(final_transcript.strip() + "\n")
             print("Transcript saved.")
         except Exception as e:
             print(f"Error saving transcript: {e}")
             self.show_message_box("error", "File Save Error", f"Could not save transcript: {e}")
 
-    # --- Button State Helper ---
-
     def set_recording_button_state(self, state):
-        """
-        Updates the text and icon of the Submit/Record button based on the current state.
-        Retrieves necessary icons from the interview page instance.
-        """
-        # Get the button widget from the interview page instance
         if not self.interview_page_instance:
             return
         target_button = getattr(self.interview_page_instance, 'submit_button', None)
         if not target_button:
-            # This might happen briefly during startup or shutdown
-            # print("Warning: Submit button not found on interview page during set_recording_button_state.")
             return
-
         target_icon = None
-        target_text = "Submit Answer" # Default
-
-        # Access icons stored on the interview page instance
-        # Use getattr for safety in case icons didn't load
+        target_text = "Submit Answer"
         submit_icon = getattr(self.interview_page_instance, 'submit_icon', None)
         record_icon = getattr(self.interview_page_instance, 'record_icon', None)
         listening_icon = getattr(self.interview_page_instance, 'listening_icon', None)
         processing_icon = getattr(self.interview_page_instance, 'processing_icon', None)
-
-        # Determine text, icon, and enabled state based on the requested state
         if state == 'listening':
             target_text = "Listening..."
             target_icon = listening_icon
-            target_button.setEnabled(False) # Cannot click while listening
+            target_button.setEnabled(False)
         elif state == 'processing':
             target_text = "Processing..."
             target_icon = processing_icon
-            target_button.setEnabled(False) # Cannot click while processing
+            target_button.setEnabled(False)
         elif state == 'idle':
-            target_button.setEnabled(True) # Enable button in idle state
-            if self.use_speech_input:
-                target_text = "Record Answer"
-                target_icon = record_icon
-            else:
-                target_text = "Submit Answer"
-                target_icon = submit_icon
-        else: # Fallback (treat as idle)
             target_button.setEnabled(True)
             if self.use_speech_input:
                 target_text = "Record Answer"
@@ -587,258 +555,303 @@ class InterviewApp(QWidget):
             else:
                 target_text = "Submit Answer"
                 target_icon = submit_icon
-
-        # Apply the changes to the button
+        else:
+            target_button.setEnabled(True)
+            if self.use_speech_input:
+                target_text = "Record Answer"
+                target_icon = record_icon
+            else:
+                target_text = "Submit Answer"
+                target_icon = submit_icon
         target_button.setText(target_text)
         if target_icon and not target_icon.isNull():
             target_button.setIcon(target_icon)
-            target_button.setIconSize(self.icon_size) # Ensure size is set
+            target_button.setIconSize(self.icon_size)
         else:
-            target_button.setIcon(QIcon()) # Clear icon if none provided or load failed
+            target_button.setIcon(QIcon())
 
-    # --- GUI Logic/Event Handlers (Slots) ---
+    def _process_selected_resume(self, resume_data: dict):
+        original_filepath = resume_data.get("path")
+        preferred_name = resume_data.get("name")
+
+        if not original_filepath or not os.path.exists(original_filepath):
+            self.show_message_box("error", "File Error", f"Selected file not found:\n{original_filepath}")
+            self.update_status("Selected resume not found.")
+            recent_list = self.config.get("recent_resumes", [])
+            updated_list = [item for item in recent_list if item.get("path") != original_filepath]
+            if len(updated_list) < len(recent_list):
+                self.config["recent_resumes"] = updated_list
+                self._save_config()
+                self._update_ui_from_state()
+            return
+
+        filename = os.path.basename(original_filepath)
+        target_filepath = self.resumes_dir / filename
+        managed_path_str = str(target_filepath)
+        custom_name = preferred_name
+
+        needs_copy = True
+        needs_name_prompt = False
+        is_already_managed = False
+        try:
+            if target_filepath.exists() and os.path.samefile(original_filepath, managed_path_str):
+                needs_copy = False
+                is_already_managed = True
+                if not custom_name:
+                    for item in self.config.get("recent_resumes", []):
+                        if item.get("path") == managed_path_str:
+                            custom_name = item.get("name")
+                            break
+            else:
+                needs_name_prompt = True
+        except OSError:
+             if original_filepath != managed_path_str:
+                 needs_name_prompt = True
+             else:
+                 needs_copy = False
+                 is_already_managed = True
+                 if not custom_name:
+                     for item in self.config.get("recent_resumes", []):
+                        if item.get("path") == managed_path_str:
+                            custom_name = item.get("name")
+                            break
+
+        if needs_name_prompt:
+            suggested_name = os.path.splitext(filename)[0].replace('_', ' ').replace('-', ' ').title()
+            name, ok = QInputDialog.getText(
+                self, "Name Resume", "Enter a display name for this resume:",
+                QLineEdit.EchoMode.Normal,
+                suggested_name
+            )
+            if ok and name:
+                custom_name = name.strip()
+            else:
+                self.update_status("Resume loading cancelled.")
+                return
+
+        if not custom_name:
+            custom_name = os.path.splitext(filename)[0]
+
+        if needs_copy:
+            try:
+                print(f"Copying '{original_filepath}' to '{target_filepath}'...")
+                shutil.copy2(original_filepath, target_filepath)
+                print("Copy successful.")
+            except (IOError, OSError, shutil.Error) as e:
+                print(f"Error copying resume file: {e}")
+                self.show_message_box("error", "File Error", f"Could not copy resume file:\n{e}")
+                self.update_status("Failed to copy resume.")
+                return
+
+        self.update_status(f"Loading resume '{custom_name}'...", True)
+        QApplication.processEvents()
+        extracted_content = logic.extract_text_from_pdf(managed_path_str)
+        self.update_status("", False)
+
+        if extracted_content is None:
+             self.show_message_box("error", "PDF Error", f"Failed to extract text from '{filename}'.")
+             if self.setup_page_instance:
+                 self.setup_page_instance.show_selection_state(None)
+             if self.pdf_filepath == managed_path_str:
+                 self.pdf_filepath = None
+                 self.resume_content = ""
+             self.set_setup_controls_state(False)
+             self.update_status("PDF extraction failed.")
+             return
+
+        self.pdf_filepath = managed_path_str
+        self.resume_content = extracted_content
+        self.update_status(f"Resume '{custom_name}' loaded.")
+        self.set_setup_controls_state(True)
+        self._add_recent_resume(custom_name, managed_path_str)
+        if self.setup_page_instance:
+            self.setup_page_instance.show_selection_state(managed_path_str, custom_name)
 
     def _handle_openai_tts_change(self, check_state_value):
-        """
-        Slot triggered when the 'Use OpenAI TTS' checkbox state changes.
-        Attempts to set the TTS provider and updates the UI accordingly.
-        """
         checkbox = getattr(self.setup_page_instance, 'openai_tts_checkbox', None)
         is_checked = (check_state_value == Qt.CheckState.Checked.value)
-        target_provider = "openai" if is_checked else tts.DEFAULT_PROVIDER # Fallback to default if unchecked
+        target_provider = "openai" if is_checked else tts.DEFAULT_PROVIDER
         print(f"OpenAI TTS change detected. Target provider: '{target_provider}'")
-
-        # Block signals on the checkbox to prevent loops if we change its state programmatically
         if checkbox:
             checkbox.blockSignals(True)
-
-        # Attempt to set the TTS provider via the core TTS facade
         success = tts.set_provider(target_provider)
-
         if success:
-            self.use_openai_tts = is_checked # Update the main application state
+            self.use_openai_tts = is_checked
             current_provider = tts.get_current_provider()
             self.update_status(f"TTS Provider set to: {current_provider}")
             print(f"Successfully set TTS provider to: {current_provider}")
         else:
-            # Setting the provider failed, revert state and UI
-            self.use_openai_tts = False # Revert state variable
+            self.use_openai_tts = False
             if is_checked and checkbox:
-                checkbox.setChecked(False) # Uncheck the box visually
-
+                checkbox.setChecked(False)
             print(f"Failed to set provider '{target_provider}'. Attempting fallback...")
-            # Try setting default provider as fallback
             if not tts.set_provider(tts.DEFAULT_PROVIDER):
-                 # Final fallback if default also fails
                  potential = tts.get_potentially_available_providers()
                  final_fallback = potential[0] if potential else None
                  if final_fallback and tts.set_provider(final_fallback):
                       print(f"Fallback to first available '{final_fallback}' succeeded.")
                  else:
-                      # Critical failure - no TTS available
                       print("ERROR: Failed to set any TTS provider.")
                       self.show_message_box("error", "TTS Error", f"Failed to set TTS provider '{target_provider}' and could not fall back. Check console and dependencies/keyring.")
-                      # Optionally disable the checkbox entirely if it's unusable
                       if checkbox:
                           checkbox.setEnabled(False)
                           checkbox.setToolTip("TTS provider error. Check console.")
             else:
                  print(f"Fallback to default provider '{tts.DEFAULT_PROVIDER}' succeeded.")
-
             current_provider = tts.get_current_provider()
             status_msg = f"Failed to set OpenAI TTS. Using: {current_provider or 'None'}"
             self.update_status(status_msg)
-
-            # Show a more specific error message if enabling OpenAI was the action that failed
             if is_checked:
                  openai_keyring_info = ""
-                 try: # Safely construct keyring info string
+                 try:
                      openai_keyring_info = f"(Service: '{tts.tts_providers['openai'].KEYRING_SERVICE_NAME_OPENAI}')"
                  except (KeyError, AttributeError):
                      openai_keyring_info = "(Keyring details unavailable)"
-
                  self.show_message_box("warning", "OpenAI TTS Failed",
                                       f"Could not enable OpenAI TTS.\nPlease ensure:\n"
                                       f"- Dependencies are installed (openai, sounddevice, pydub, etc.).\n"
                                       f"- API key is stored correctly in keyring {openai_keyring_info}.\n"
                                       f"- FFmpeg is installed and accessible in PATH.\nCheck console logs for details. Currently using: {current_provider or 'None'}")
-
-        # Re-enable signals on the checkbox
         if checkbox:
             checkbox.blockSignals(False)
 
     def update_submit_button_text(self, check_state_value=None):
-        """
-        Slot triggered by the 'Use Speech Input' checkbox. Updates the STT state
-        and the appearance/behavior of the submit/record button and answer input field.
-        Can also be called directly to refresh button state.
-        """
-        # Update state if called directly from the checkbox signal
         if check_state_value is not None:
             self.use_speech_input = (check_state_value == Qt.CheckState.Checked.value)
             print(f"Use Speech Input (STT) state changed to: {self.use_speech_input}")
-
-        # Update button appearance (text/icon) based on the STT mode,
-        # but only if not currently in a recording/processing state.
         if not self.is_recording:
-            self.set_recording_button_state('idle') # Update to 'Record Answer' or 'Submit Answer'
-
-        # Adjust the answer input field's behavior
+            self.set_recording_button_state('idle')
         answer_input_widget = getattr(self.interview_page_instance, 'answer_input', None)
         if answer_input_widget:
             is_text_mode = not self.use_speech_input
-
-            # Determine if interview controls should generally be enabled
-            # (i.e., not waiting for question, not currently processing answer)
             submit_btn = getattr(self.interview_page_instance, 'submit_button', None)
-            # Controls enabled if submit button *is currently* enabled AND not currently recording
-            # Note: button might be disabled by processing state, check that too.
             controls_generally_active = submit_btn and submit_btn.isEnabled() and not self.is_recording
-
-            # Set read-only based on input mode
             answer_input_widget.setReadOnly(not is_text_mode)
-            # Set enabled state based on mode AND whether controls are generally active
-            # Input field should be disabled if not in text mode OR if controls are generally inactive
             answer_input_widget.setEnabled(is_text_mode and controls_generally_active)
-
-            # Update placeholder text and focus
             if is_text_mode and controls_generally_active:
                 answer_input_widget.setFocus()
                 answer_input_widget.setPlaceholderText("Type your answer here...")
-            elif not is_text_mode: # Speech input mode
-                answer_input_widget.clear() # Clear any typed text when switching to speech
+            elif not is_text_mode:
+                answer_input_widget.clear()
                 answer_input_widget.setPlaceholderText("Click 'Record Answer' to speak...")
-            else: # Text mode, but controls are disabled (e.g., waiting for question/processing)
+            else:
                  answer_input_widget.setPlaceholderText("Waiting for question or processing...")
 
     def select_resume_file(self):
-        """Slot triggered by the 'Select Resume PDF' button."""
-        # Default to user's home directory
         start_dir = os.path.expanduser("~")
-        # Convert to platform-specific path separators if needed (though Qt often handles it)
         start_dir_native = os.path.normpath(start_dir)
-
         filepath, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Resume PDF",
-            start_dir_native,
-            "PDF Files (*.pdf)"
+            self, "Select New Resume PDF", start_dir_native, "PDF Files (*.pdf)"
         )
-
-        file_label_widget = getattr(self.setup_page_instance, 'file_label', None)
-
-        if not filepath:
-            # User cancelled - only update label if no file was previously selected
-            if file_label_widget and not self.pdf_filepath:
-                file_label_widget.setText("Selection cancelled.")
+        if filepath:
+            self._process_selected_resume({"path": filepath, "name": None})
+        else:
             self.update_status("Resume selection cancelled.")
-            return
 
-        # --- File successfully selected ---
-        self.pdf_filepath = filepath # Store the path
-        filename = os.path.basename(filepath)
-        if file_label_widget:
-            file_label_widget.setText(filename) # Update label
+    def _handle_resume_widget_selected(self, resume_data: dict):
+        print(f"ResumeWidget selected: {resume_data.get('name')}")
+        if isinstance(resume_data, dict) and 'path' in resume_data:
+            self._process_selected_resume(resume_data)
+        else:
+            print("Warning: Received invalid data from ResumeWidget click.")
 
-        # --- Extract text immediately ---
-        self.update_status(f"Extracting text from '{filename}'...", True) # Show busy state
-        QApplication.processEvents() # Ensure UI updates before potentially long operation
-        self.resume_content = logic.extract_text_from_pdf(self.pdf_filepath)
-        self.update_status("", False) # Clear busy state AFTER extraction attempt
+    def _handle_add_new_jd(self):
+        jd_text, ok = QInputDialog.getMultiLineText(
+            self,
+            "Add Job Description",
+            "Paste the full job description text below:"
+        )
+        if ok and jd_text:
+            jd_text = jd_text.strip()
+            if not jd_text:
+                self.show_message_box("warning", "Input Needed", "Job description text cannot be empty.")
+                return
+            name, ok_name = QInputDialog.getText(
+                self,
+                "Name Job Description",
+                "Enter a short, unique name for this job description (e.g., 'Software Engineer - Acme'):"
+            )
+            if ok_name and name:
+                name = name.strip()
+                if not name:
+                    self.show_message_box("warning", "Input Needed", "Job description name cannot be empty.")
+                    return
+                existing_names = [item.get("name") for item in self.config.get("recent_job_descriptions", [])]
+                if name in existing_names:
+                    reply = QMessageBox.question(self, 'Overwrite JD?',
+                                                 f"A job description named '{name}' already exists. Overwrite it?",
+                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                                 QMessageBox.StandardButton.No)
+                    if reply == QMessageBox.StandardButton.No:
+                        return
+                self._add_recent_jd(name, jd_text)
+                self.selected_jd_name = name
+                self.job_description_text = jd_text
+                self._update_ui_from_state()
+                self.update_status(f"Job description '{name}' added and selected.")
+            else:
+                self.update_status("Job description add cancelled (no name provided).")
+        elif ok:
+             self.show_message_box("warning", "Input Needed", "Job description text cannot be empty.")
+        else:
+            self.update_status("Job description add cancelled.")
 
-        if self.resume_content is None:
-             # Extraction failed
-             self.show_message_box("error", "PDF Error", f"Failed to extract text from {filename}. It might be image-based, empty, or protected.")
-             self.pdf_filepath = None # Reset path state
-             if file_label_widget:
-                 file_label_widget.setText("Extraction Failed. Select again.")
-             self.set_setup_controls_state(False) # Disable dependent controls via page method
-             self.update_status("PDF extraction failed.")
-             return
-
-        # --- Extraction Success ---
-        self.update_status("Resume loaded. Configure interview or paste job description.")
-        self.set_setup_controls_state(True) # Enable other setup controls via page method
-        job_desc_widget = getattr(self.setup_page_instance, 'job_desc_input', None)
-        if job_desc_widget:
-            job_desc_widget.setFocus() # Focus JD input
+    def _handle_jd_widget_selected(self, jd_data: dict):
+        name = jd_data.get("name")
+        text = jd_data.get("text")
+        print(f"JDWidget selected: {name}")
+        if name and text is not None:
+            self.selected_jd_name = name
+            self.job_description_text = text
+            self._update_ui_from_state()
+            self.update_status(f"Job description '{name}' selected.")
+        else:
+            print("Warning: Received invalid data from JDWidget click.")
 
     def start_interview_process(self):
-        """Slot triggered by the 'Start Interview' button."""
-        # --- Validation ---
-        if not self.pdf_filepath or not self.resume_content: # Check content too
+        if not self.pdf_filepath or not self.resume_content:
             self.show_message_box("warning", "Input Missing", "Please select a valid resume PDF first.")
             return
-
-        # Get job description text from the setup page widget
-        job_desc_widget = getattr(self.setup_page_instance, 'job_desc_input', None)
-        if job_desc_widget:
-            self.job_description_text = job_desc_widget.toPlainText().strip()
-        else:
-            self.job_description_text = "" # Ensure it's reset if widget not found
-
-        # Check if OpenAI TTS is selected but failed initialization (e.g., missing key)
+        current_jd_text = self.job_description_text
         if self.use_openai_tts and "openai" not in tts.get_runtime_available_providers():
-             self.show_message_box("error", "TTS Provider Error",
-                                   "OpenAI TTS is selected, but failed to initialize.\n"
-                                   "Please check API key in keyring and dependencies, or uncheck the OpenAI TTS box.\n"
-                                   "Cannot start interview.")
-             return
-
-        # --- Preparation ---
+            self.show_message_box("error", "TTS Error", "OpenAI TTS selected but unavailable.")
+            return
         print(f"Preparing Interview: Topics={self.num_topics}, FollowUps={self.max_follow_ups}, STT={self.use_speech_input}, OpenAITTS={self.use_openai_tts}")
-        # Reset interview progress state, but keep configuration (PDF, JD, topics, TTS choice etc.)
         self.reset_interview_state(clear_config=False)
-
-        self.update_status(f"Generating {self.num_topics} interview questions...", True)
-        # Disable setup controls while generating questions
-        self.set_setup_controls_state(False) # Disables most controls via page method
-        select_btn_widget = getattr(self.setup_page_instance, 'select_btn', None)
-        if select_btn_widget:
-            select_btn_widget.setEnabled(False) # Specifically disable select button
+        self.update_status(f"Generating {self.num_topics} questions...", True)
+        self.set_setup_controls_state(False)
+        upload_btn_widget = getattr(self.setup_page_instance, 'upload_resume_btn', None)
+        add_jd_btn_widget = getattr(self.setup_page_instance, 'add_jd_btn', None)
+        if upload_btn_widget: upload_btn_widget.setEnabled(False)
+        if add_jd_btn_widget: add_jd_btn_widget.setEnabled(False)
         QApplication.processEvents()
-
-        # --- Generate Initial Questions ---
         self.initial_questions = logic.generate_initial_questions(
             resume_text=self.resume_content,
-            job_desc_text=self.job_description_text,
+            job_desc_text=current_jd_text,
             num_questions=self.num_topics
         )
-
-        # --- Post-Generation ---
-        self.update_status("", False) # Clear busy status
-        pdf_loaded = bool(self.pdf_filepath) # Re-check just in case
-        self.set_setup_controls_state(pdf_loaded) # Re-enable controls via page method
-        if select_btn_widget:
-            select_btn_widget.setEnabled(True) # Re-enable select button
-
+        self.update_status("", False)
+        pdf_loaded = bool(self.pdf_filepath)
+        self.set_setup_controls_state(pdf_loaded)
+        if upload_btn_widget: upload_btn_widget.setEnabled(True)
+        if add_jd_btn_widget: add_jd_btn_widget.setEnabled(True)
         if not self.initial_questions:
             self.update_status("Error generating questions", False)
-            self.show_message_box("error", "Generation Error", "Failed to generate initial questions. Check API key/connection and console logs.")
+            self.show_message_box("error", "Gen Error", "Failed to generate questions.")
             return
-
-        # --- Success ---
-        print(f"Generated {len(self.initial_questions)} initial questions.")
+        print(f"Generated {len(self.initial_questions)} questions.")
         self.cleaned_initial_questions = {self._clean_question_text(q) for q in self.initial_questions}
-        # Handle if fewer questions generated than requested
         if len(self.initial_questions) < self.num_topics:
-             print(f"Warning: Model generated {len(self.initial_questions)} questions (requested {self.num_topics}). Proceeding with available questions.")
-             self.update_status(f"Generated {len(self.initial_questions)} questions. Starting interview...")
-             QTimer.singleShot(3000, lambda: self.update_status("Interview started."))
-
-        # Navigate to the interview page and start the first topic
+             print(f"Warn: Got {len(self.initial_questions)} questions (req {self.num_topics}).")
         self._go_to_interview_page()
-        self.current_initial_q_index = 0 # Start with the first question
+        self.current_initial_q_index = 0
         self.start_next_topic()
 
-    # --- MODIFIED ---
     def start_next_topic(self):
-        """Initiates the next topic or ends the interview if all topics are covered."""
         if not self.initial_questions:
             self._go_to_setup_page()
             return
         if 0 <= self.current_initial_q_index < len(self.initial_questions):
-            # Start the next topic
             self.follow_up_count = 0
             self.current_topic_history = []
             raw_q_text = self.initial_questions[self.current_initial_q_index]
@@ -848,46 +861,27 @@ class InterviewApp(QWidget):
             self.add_to_history(topic_marker, tag="topic_marker")
             print(f"Asking Initial Question {self.current_initial_q_index + 1}: {self.current_topic_question}")
             self.display_question(raw_q_text)
-        else: # --- End of Interview ---
+        else:
             print("\n--- Interview Finished ---")
             self.update_status("Generating results...", True)
             self.disable_interview_controls()
             QApplication.processEvents()
             self.save_transcript_to_file()
-
-            print("Generating summary review...") # Might remove if not used elsewhere
+            print("Generating summary review...")
             summary = logic.generate_summary_review(self.current_full_interview_history)
-
-            print("Generating content score analysis...") # New call
+            print("Generating content score analysis...")
             content_score_data = logic.generate_content_score_analysis(self.current_full_interview_history)
-
             print("Generating qualification assessment...")
             assessment_data = logic.generate_qualification_assessment(self.resume_content, self.job_description_text, self.current_full_interview_history)
-
             self.update_status("Results ready.", False)
-
-            # --- Handle potential errors ---
             if summary is None or summary.startswith(logic.ERROR_PREFIX):
-                # This summary is currently only used if content score fails? Re-evaluate its necessity.
-                # Let's keep the error handling for now.
                 self.show_message_box("warning", "Summary Error", f"Could not generate summary.\n{summary or ''}")
-                # summary = "*Summary generation failed.*" # Placeholder if needed
-
-            # Error for content score is handled within display_results
-
-            # Error for assessment is handled within display_results
-
-            # --- Navigate ---
-            # Pass all generated data to the results page
+            if assessment_data.get("error"):
+                 if self.job_description_text:
+                     self.show_message_box("warning", "Assessment Error", f"Could not generate assessment.\n{assessment_data.get('error', '')}")
             self._go_to_results_page(summary, assessment_data, content_score_data)
-    # --- END MODIFIED ---
-
 
     def handle_answer_submission(self):
-        """
-        Slot triggered by the Submit/Record button. Handles either text submission
-        or initiates speech recognition.
-        """
         if self.is_recording:
             print("Already recording, ignoring button press.")
             return
@@ -914,7 +908,6 @@ class InterviewApp(QWidget):
             self.process_answer(user_answer)
 
     def update_status_stt(self, message):
-        """Updates the status bar and submit/record button state based on STT messages."""
         if not self.status_bar_label:
             return
         display_message = message
@@ -949,7 +942,6 @@ class InterviewApp(QWidget):
         QApplication.processEvents()
 
     def check_stt_queue(self):
-        """Periodically checks the STT result queue for messages from the recording thread."""
         try:
             result = recording.stt_result_queue.get_nowait()
             print(f"STT Queue Received: {result}")
@@ -980,12 +972,7 @@ class InterviewApp(QWidget):
                 self.enable_interview_controls()
             self.update_status(f"Error checking speech recognition: {e}")
 
-
     def process_answer(self, user_answer):
-        """
-        Processes the user's answer (text or STT result), adds it to history,
-        generates a follow-up question or moves to the next topic.
-        """
         last_q = self.last_question_asked or "[Unknown Question]"
         print(f"Processing answer for Q: '{last_q[:50]}...' -> A: '{user_answer[:50]}...'")
         q_data = {"q": last_q, "a": user_answer}
@@ -1028,15 +1015,10 @@ class InterviewApp(QWidget):
         if QApplication.overrideCursor() is not None:
             QApplication.restoreOverrideCursor()
 
-    # --- Results Page Actions (Slots) ---
-    # --- MODIFIED ---
     def _save_report(self):
-        """Slot triggered by the 'Save Report' button on the results page."""
         if not self.results_page_instance:
             self.show_message_box("warning", "Internal Error", "Results page not found.")
             return
-
-        # Retrieve dynamic content score analysis
         content_score = 0
         content_analysis_text = "N/A"
         content_score_error = None
@@ -1044,8 +1026,6 @@ class InterviewApp(QWidget):
             content_score = self.last_content_score_data.get('score', 0)
             content_analysis_text = self.last_content_score_data.get('analysis_text', 'N/A')
             content_score_error = self.last_content_score_data.get('error')
-
-        # Retrieve dynamic assessment data
         assessment_error = None
         requirements_list = []
         overall_fit_text = "N/A"
@@ -1053,25 +1033,18 @@ class InterviewApp(QWidget):
             assessment_error = self.last_assessment_data.get("error")
             requirements_list = self.last_assessment_data.get("requirements", [])
             overall_fit_text = self.last_assessment_data.get("overall_fit", "N/A")
-
-        # Check if there's anything substantial to save
         is_content_error = bool(content_score_error)
         is_assessment_error = bool(assessment_error)
         is_assessment_empty = not requirements_list and overall_fit_text == "N/A"
-
-        # Check if only placeholders/errors exist
         content_widget = getattr(self.results_page_instance, 'content_score_text_edit', None)
-        placeholder_summary_check = "*Content score analysis loading...*" # Match placeholder
+        placeholder_summary_check = "*Content score analysis loading...*"
         placeholder_overall_fit_check = "<b>Overall Fit Assessment:</b> *Loading...*"
         current_content_text = content_widget.toPlainText().strip() if content_widget else ""
         current_overall_label = getattr(self.results_page_instance, 'overall_fit_label', None)
         current_overall_text = current_overall_label.text() if current_overall_label else ""
-
         if current_content_text == placeholder_summary_check and current_overall_text == placeholder_overall_fit_check :
              self.show_message_box("warning", "No Data", "Results have not been generated yet, nothing to save.")
              return
-
-        # --- Format the report content ---
         report_lines = [
             f"Interview Report", f"{'='*16}\n",
             f"Speech Delivery Score: {FIXED_SPEECH_SCORE}%", f"{'-'*23}",
@@ -1083,7 +1056,6 @@ class InterviewApp(QWidget):
         else:
             report_lines.append(content_analysis_text.replace('**', '').replace('*', ''))
         report_lines.append("\n")
-
         report_lines.extend([f"Job Fit Analysis", f"{'-'*16}"])
         if assessment_error:
             report_lines.append(f"Assessment Error: {assessment_error}")
@@ -1100,10 +1072,7 @@ class InterviewApp(QWidget):
             cleaned_overall_fit = overall_fit_text.replace('<b>','').replace('</b>','').replace('*','')
             if cleaned_overall_fit != "N/A":
                 report_lines.append(f"\nOverall Fit Assessment: {cleaned_overall_fit}")
-
         report_content = "\n".join(report_lines)
-
-        # --- Save File Dialog Logic ---
         default_filename = "interview_report.txt"
         if self.pdf_filepath:
             base = os.path.splitext(os.path.basename(self.pdf_filepath))[0]
@@ -1127,7 +1096,6 @@ class InterviewApp(QWidget):
                 self.show_message_box("error", "Save Error", f"Could not save:\n{e}")
         else:
             self.update_status("Report save cancelled.")
-    # --- END MODIFIED ---
 
     def _open_recordings_folder(self):
         folder_path = RECORDINGS_DIR
