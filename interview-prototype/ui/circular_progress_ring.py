@@ -4,7 +4,7 @@ Custom QWidget for displaying a circular ring progress indicator.
 """
 from PyQt6.QtWidgets import QWidget, QSizePolicy
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
-from PyQt6.QtCore import Qt, QRectF, pyqtProperty
+from PyQt6.QtCore import Qt, QRectF, pyqtProperty, QSize # <--- IMPORT ADDED
 
 class CircularProgressBarRing(QWidget):
     """A widget that draws a circular progress ring."""
@@ -25,9 +25,6 @@ class CircularProgressBarRing(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.MinimumExpanding)
 
     # --- Properties ---
-    # Use pyqtProperty for better integration, e.g., with QSS if needed later,
-    # although we primarily control via methods now.
-
     @pyqtProperty(int)
     def minimum(self):
         return self._minimum
@@ -58,7 +55,6 @@ class CircularProgressBarRing(QWidget):
             self.update()
 
     # --- Appearance Customization Methods ---
-
     def setProgressColor(self, color: QColor):
         if self._progress_color != color:
             self._progress_color = color
@@ -90,11 +86,11 @@ class CircularProgressBarRing(QWidget):
     # --- Size Hints ---
     def minimumSizeHint(self):
         # Suggest a minimum reasonable size
-        return QSize(int(self._ring_thickness * 4), int(self._ring_thickness * 4))
+        return QSize(int(self._ring_thickness * 4), int(self._ring_thickness * 4)) # Uses QSize
 
     def sizeHint(self):
          # Default size hint
-        return QSize(100, 100)
+        return QSize(100, 100) # Uses QSize
 
     # --- Painting ---
     def paintEvent(self, event):
@@ -110,7 +106,8 @@ class CircularProgressBarRing(QWidget):
         # Calculate angles (angles in 1/16th of a degree for QPainter.drawArc)
         # Ensure maximum isn't equal to minimum to avoid division by zero
         range_value = (self._maximum - self._minimum)
-        if range_value == 0: range_value = 1 # Avoid division by zero
+        if range_value == 0:
+            range_value = 1 # Avoid division by zero
 
         # Map value to angle (0-360 degrees)
         progress_angle = (self._value - self._minimum) * 360.0 / range_value
@@ -143,7 +140,7 @@ class CircularProgressBarRing(QWidget):
         painter.setFont(font)
 
         fm = QFontMetrics(font)
-        text_rect = fm.boundingRect(text)
+        # text_rect = fm.boundingRect(text) # Not strictly needed if using drawText with alignment
         text_pen = QPen(self._text_color)
         painter.setPen(text_pen)
 

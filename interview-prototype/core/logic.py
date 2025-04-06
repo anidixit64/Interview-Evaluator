@@ -2,11 +2,14 @@
 # Handles core processing: Gemini API, PDF extraction, content generation.
 
 import os
-# REMOVED: from dotenv import load_dotenv
-import keyring # ADDED
+import re
+import keyring
 import google.generativeai as genai
 from PyPDF2 import PdfReader
-import sys # For potentially exiting on critical config error
+import sys
+
+# --- Import Prompts ---
+from . import prompts # Relative import for prompts.py in the same directory
 
 # --- Default Configuration & Constants ---
 DEFAULT_NUM_TOPICS = 5
@@ -17,12 +20,11 @@ MIN_FOLLOW_UPS = 0
 MAX_FOLLOW_UPS_LIMIT = 5
 
 MODEL_NAME = "gemini-1.5-flash-latest"
-ERROR_PREFIX = "Error: " # Standard prefix for returning errors
+ERROR_PREFIX = "Error: "
 
-# --- Keyring Constants for Gemini --- ADDED SECTION ---
+# --- Keyring Constants for Gemini ---
 KEYRING_SERVICE_NAME_GEMINI = "InterviewBotPro_Gemini"
 KEYRING_USERNAME_GEMINI = "gemini_api_key"
-# --- END Keyring Constants ---
 
 # --- Core Logic Functions ---
 
@@ -30,28 +32,21 @@ def configure_gemini():
     """
     Loads Google API key from keyring and configures the Gemini client.
     Returns True on success, False on failure.
-    Prints errors to console. Exits if API key is missing or keyring fails.
     """
-    # REMOVED: load_dotenv()
     api_key = None
     try:
-        print(f"Attempting to retrieve Gemini API key from keyring (Service: '{KEYRING_SERVICE_NAME_GEMINI}')...") # MODIFIED message
-        api_key = keyring.get_password(KEYRING_SERVICE_NAME_GEMINI, KEYRING_USERNAME_GEMINI) # MODIFIED key retrieval
+        print(f"Attempting to retrieve Gemini API key from keyring (Service: '{KEYRING_SERVICE_NAME_GEMINI}')...")
+        api_key = keyring.get_password(KEYRING_SERVICE_NAME_GEMINI, KEYRING_USERNAME_GEMINI)
         if not api_key:
-            # Critical error, print and exit is acceptable before UI starts
-            # MODIFIED error message
-            print(f"{ERROR_PREFIX}Gemini API key not found in keyring for service '{KEYRING_SERVICE_NAME_GEMINI}' and username '{KEYRING_USERNAME_GEMINI}'.")
+            print(f"{ERROR_PREFIX}Gemini API key not found in keyring for service '{KEYRING_SERVICE_NAME_GEMINI}'.")
             print("Please store your key using your system's keyring.")
-            print("Example command: keyring set InterviewBotPro_Gemini gemini_api_key")
-            return False # Signal failure
-        print("Gemini API key retrieved from keyring.") # ADDED success message
+            return False
+        print("Gemini API key retrieved from keyring.")
 
     except Exception as e:
         print(f"{ERROR_PREFIX}Accessing keyring failed: {e}")
-        print("Ensure keyring is installed and a backend is available.")
-        return False # Signal failure
+        return False
 
-    # --- Configure Gemini using the retrieved key ---
     try:
         genai.configure(api_key=api_key)
         print("Gemini API configured successfully.")
@@ -64,10 +59,9 @@ def extract_text_from_pdf(pdf_path):
     """
     Extracts text from a given PDF file path.
     Returns extracted text string on success, None on failure.
-    Prints errors/warnings to console.
     """
     if not pdf_path or not os.path.exists(pdf_path):
-        print(f"{ERROR_PREFIX}Invalid or non-existent PDF path provided: {pdf_path}")
+        print(f"{ERROR_PREFIX}Invalid or non-existent PDF path: {pdf_path}")
         return None
     print(f"Reading PDF: {pdf_path}...")
     try:
@@ -79,8 +73,8 @@ def extract_text_from_pdf(pdf_path):
                 text += page_text + "\n"
 
         if not text.strip():
-            print(f"Warning: No text could be extracted from '{os.path.basename(pdf_path)}'. The PDF might be image-based or empty.")
-            return None # Return None to clearly signal potential issue.
+            print(f"Warning: No text extracted from '{os.path.basename(pdf_path)}'.")
+            return None
         print("PDF text extracted successfully.")
         return text
     except Exception as e:
@@ -91,7 +85,6 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
     """
     Generates initial interview questions based on resume and optional job description.
     Returns a list of questions on success, None on failure.
-    Prints errors/warnings to console.
     """
     print(f"Generating {num_questions} initial questions using {model_name}...")
     if not resume_text:
@@ -99,22 +92,19 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
         return None
     try:
         model = genai.GenerativeModel(model_name)
-        prompt_sections = [
-            "You are a hiring manager preparing for a first-round screening interview.",
-            f"Generate exactly {num_questions} insightful and tailored interview questions based on the candidate's resume and the provided job description.",
-            "Your questions should aim to:",
-            "  1. Assess the candidate's fit for the role described in the job description (if provided).",
-            "  2. Probe deeper into specific skills, experiences, or projects mentioned in the resume that seem relevant.",
-            "  3. Identify potential gaps or areas needing clarification.",
-            "Avoid generic questions. Phrase them clearly as conversation starters.",
-            "Format the output ONLY as a numbered list, with each question on a new line (e.g., '1. Question text'). Do not include any introductory or concluding text, just the numbered questions.",
-            "\nCandidate's Resume Text:", "---", resume_text, "---" ]
+
+        # Prepare job description section for the prompt
         if job_desc_text:
-            prompt_sections.extend([ "\nJob Description Text:", "---", job_desc_text, "---" ])
+            job_desc_section = prompts.JOB_DESC_SECTION_TEMPLATE.format(job_desc_text=job_desc_text)
         else:
-            prompt_sections.append("\n(No job description provided - focus questions based on the resume alone, imagining a generally relevant professional role).")
-        prompt_sections.append(f"\n{num_questions} Tailored Interview Questions (Numbered List Only):")
-        prompt = "\n".join(prompt_sections)
+            job_desc_section = prompts.NO_JOB_DESC_SECTION
+
+        # Format the main prompt template
+        prompt = prompts.INITIAL_QUESTIONS_PROMPT_TEMPLATE.format(
+            num_questions=num_questions,
+            resume_text=resume_text,
+            job_desc_section=job_desc_section
+        )
 
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -125,53 +115,43 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
 
         response = model.generate_content(prompt, safety_settings=safety_settings)
 
-        # Handle potential blocks or empty responses
         if not response.parts:
              feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
              block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
-             safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
-             error_message = f"Received empty or blocked response for initial questions.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
-             print(f"{ERROR_PREFIX}Initial Questions Generation: {error_message}")
-             return None # Signal failure
+             print(f"{ERROR_PREFIX}Initial Questions Gen: Empty/blocked response. Reason: {block_reason}")
+             return None
 
-        # Process successful response
         generated_text = response.text.strip()
         lines = generated_text.split('\n')
         questions = []
         for line in lines:
             line_strip = line.strip()
-            # Basic check for numbered list format
             if line_strip and line_strip[0].isdigit():
-                # Simple parsing: find first non-digit, non-dot/space/paren char
                 first_char_index = -1
                 for i, char in enumerate(line_strip):
                     if not char.isdigit() and char not in ['.', ' ', ')']:
                         first_char_index = i
                         break
                 if first_char_index != -1:
-                     # Add the whole stripped line (cleaning happens in UI)
                      questions.append(line_strip)
-                else: # Malformed line (e.g., just "1.")
-                     print(f"Skipping malformed line during question parsing: {line_strip}")
+                else:
+                     print(f"Skipping malformed question line: {line_strip}")
 
-        # Limit to requested number, even if model gave more
         questions = questions[:num_questions]
 
         if questions:
             print(f"Successfully generated {len(questions)} initial questions.")
             if len(questions) < num_questions:
-                # This is just informational, not an error
-                print(f"Note: Model generated {len(questions)} initial questions (requested {num_questions}). This might happen if input is short or model couldn't find enough distinct points.")
+                print(f"Note: Model generated {len(questions)} questions (requested {num_questions}).")
             return questions
         else:
-            # Model responded but parsing failed or gave empty list
-            print(f"Warning: Model response for initial questions was empty or not in the expected numbered list format after parsing:\n\n{generated_text}")
-            return None # Signal potential issue
+            print(f"Warning: Model response empty or not parsed correctly:\n{generated_text}")
+            return None
 
     except Exception as e:
-        err_msg = f"Generating initial questions with Gemini: {e}"
+        err_msg = f"Generating initial questions: {e}"
         if "400" in str(e) and ("prompt" in str(e).lower() or "request payload" in str(e).lower() or "resource exhausted" in str(e).lower()):
-             err_msg += f"\n\n{ERROR_PREFIX}Error 400 or Resource Exhausted: The combined text (Resume + Job Description) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs or a model with a larger context window if available."
+             err_msg += f"\n{ERROR_PREFIX}Inputs might be too large for model ('{MODEL_NAME}')."
         print(f"{ERROR_PREFIX}{err_msg}")
         return None
 
@@ -179,30 +159,18 @@ def generate_follow_up_question(context_question, user_answer, conversation_hist
     """
     Generates a follow-up question based on the last answer and context.
     Returns the follow-up question string, "[END TOPIC]", or None on error.
-    Prints errors to console.
     """
     print(f"Generating follow-up question using {model_name}...")
     try:
         model = genai.GenerativeModel(model_name)
-        # Limit history context sent to model
-        history_str = "\n".join([f"Q: {item['q'][:100]}...\nA: {item['a'][:150]}..." for item in conversation_history[-3:]]) # Send last 3 Q/A pairs (limited length)
-        prompt = f"""
-        You are an interviewer conducting a screening call.
-        The original topic question was: "{context_question}"
-        Recent conversation on this topic:
-        ---
-        {history_str}
-        ---
-        Candidate's most recent answer: "{user_answer}"
+        history_str = "\n".join([f"Q: {item['q'][:100]}...\nA: {item['a'][:150]}..." for item in conversation_history[-3:]]) # Limit history context
 
-        Based ONLY on the candidate's *last answer* in the context of the *original topic question*, ask ONE concise and relevant follow-up question to probe deeper or clarify something specific from their answer.
-        *   If the answer was comprehensive and clear, and no natural follow-up arises, respond with exactly: `[END TOPIC]`
-        *   Do NOT ask generic questions.
-        *   Do NOT summarize the answer.
-        *   Generate ONLY the single follow-up question OR the text `[END TOPIC]`.
-        *   Keep the follow-up question focused and brief.
-
-        Follow-up Question or End Signal: """
+        # Format the prompt template
+        prompt = prompts.FOLLOW_UP_PROMPT_TEMPLATE.format(
+            context_question=context_question,
+            history_str=history_str,
+            user_answer=user_answer
+        )
 
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -216,47 +184,36 @@ def generate_follow_up_question(context_question, user_answer, conversation_hist
         if not response.parts:
             feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
             block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
-            print(f"Warning: Follow-up Generation - Empty/blocked response. Reason: {block_reason}. Ending topic.")
-            return "[END TOPIC]" # Treat block as end of topic
+            print(f"Warning: Follow-up Gen - Empty/blocked. Reason: {block_reason}. Ending topic.")
+            return "[END TOPIC]"
 
         follow_up = response.text.strip()
         print(f"Generated follow-up attempt: '{follow_up}'")
 
         if not follow_up:
             print("Warning: Received empty follow-up response, ending topic.")
-            return "[END TOPIC]" # Treat empty as end
-
-        if follow_up == "[END TOPIC]":
-            print("End topic signal received.")
             return "[END TOPIC]"
 
-        # Basic validation/warnings (optional)
-        if '?' not in follow_up and len(follow_up.split()) > 5:
-            print("Warning: Generated follow-up might not be a question. Using it anyway.")
-        elif len(follow_up.split()) < 3:
-             print("Warning: Generated follow-up is very short. Using it anyway.")
-
-        return follow_up # Return the generated question
+        # Return exact signal or generated question
+        return follow_up
 
     except Exception as e:
         print(f"{ERROR_PREFIX}Generating follow-up question: {e}")
-        # Return None to indicate an error occurred, distinct from "[END TOPIC]"
-        return None
+        return None # Indicate error
 
 def generate_summary_review(full_history, model_name=MODEL_NAME):
     """
     Generates a performance summary and review based on the interview transcript.
-    Returns the summary string (Markdown formatted), or an error string starting with ERROR_PREFIX.
-    Prints errors to console.
+    Returns the summary string (Markdown formatted), or an error string.
     """
     print(f"Generating interview summary and review using {model_name}...")
     if not full_history:
-        print("No interview history recorded for summary.")
+        print("No history for summary.")
         return "No interview history recorded."
     try:
         model = genai.GenerativeModel(model_name)
 
-        # Prepare transcript, limiting length
+        # Prepare transcript (limited length)
         transcript_parts = []
         total_len = 0
         max_len = 15000
@@ -273,38 +230,8 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
                 break
         transcript = "".join(transcript_parts)
 
-        # --- UPDATED PROMPT ---
-        prompt = f"""
-        Act as an objective hiring manager critically reviewing a candidate's screening interview performance based ONLY on the transcript below. Your goal is to assess their communication, clarity, and the substance of their answers in this specific conversation.
-
-        Transcript:
-        ---
-        {transcript}
-        ---
-
-        Provide the following analysis using simple Markdown for formatting (e.g., **bold** for headings, `-` for list items):
-
-        **1. Overall Communication & Approach:**
-            - Communication style: ...
-            - Preparedness: ...
-            - Answer Structure & Effectiveness: ...
-
-        **2. Strengths in Responses:**
-            - Strength 1: ... (Evidence: ...)
-            - Strength 2: ... (Evidence: ...)
-            - Strength 3: ... (Evidence: ...)
-
-        **3. Areas for Improvement in Responses:**
-            - Area 1: ... (Evidence: ...)
-            - Area 2: ... (Evidence: ...)
-            - Area 3: ... (Evidence: ...)
-
-        **4. Overall Impression (from this interview only):**
-            - Impression: ...
-
-        Ensure the analysis is balanced and constructive based ONLY on the transcript.
-        """
-        # --- END UPDATED PROMPT ---
+        # Format the prompt template
+        prompt = prompts.SUMMARY_REVIEW_PROMPT_TEMPLATE.format(transcript=transcript)
 
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -318,90 +245,150 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
         if not response.parts:
             feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
             block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
-            safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
-            error_message = f"Empty or blocked response for Summary/Review.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
-            print(f"{ERROR_PREFIX}Summary/Review Generation: {error_message}")
+            print(f"{ERROR_PREFIX}Summary/Review Gen: Empty/blocked. Reason: {block_reason}")
             return f"{ERROR_PREFIX}Could not generate summary/review. Reason: {block_reason}"
 
         print("Summary/review generated.")
-        return response.text.strip() # Return the Markdown formatted text
+        return response.text.strip()
 
     except Exception as e:
         error_message = f"Generating summary/review: {e}"
         print(f"{ERROR_PREFIX}{error_message}")
         return f"{ERROR_PREFIX}Could not generate summary/review.\nDetails: {e}"
 
+def generate_content_score_analysis(full_history, model_name=MODEL_NAME):
+    """
+    Generates a score (1-100) and analysis based on answer structure and relevance.
+    Returns a dictionary: {'score': int, 'analysis_text': str, 'error': str | None}.
+    """
+    print(f"Generating content score and analysis using {model_name}...")
+    result = {'score': 0, 'analysis_text': None, 'error': None} # Default result
 
-def generate_qualification_assessment(resume_text, job_desc_text, full_history, model_name=MODEL_NAME):
-    """
-    Generates an assessment of candidate qualifications against the job description.
-    Returns the assessment string (Markdown formatted), or an error string starting with ERROR_PREFIX.
-    Prints errors to console.
-    """
-    print(f"Generating qualification assessment using {model_name}...")
-    if not job_desc_text:
-        print("No job description provided, skipping qualification assessment.")
-        return "No job description provided, cannot perform qualification assessment."
-    if not resume_text:
-        print("No resume text available, skipping qualification assessment.")
-        return "No resume text available, cannot perform qualification assessment."
+    if not full_history:
+        result['error'] = "No interview history recorded for content scoring."
+        print(result['error'])
+        return result
 
     try:
         model = genai.GenerativeModel(model_name)
 
-        # Prepare transcript, limiting length
+        # Prepare transcript snippet (similar to summary review)
         transcript_parts = []
         total_len = 0
-        max_len = 20000
+        max_len = 15000 # Use a reasonable length limit
+        for item in reversed(full_history):
+            q_part = f"Interviewer Q: {item['q']}\n"
+            a_part = f"Candidate A: {item['a']}\n\n"
+            item_len = len(q_part) + len(a_part)
+            if total_len + item_len < max_len:
+                transcript_parts.insert(0, a_part)
+                transcript_parts.insert(0, q_part)
+                total_len += item_len
+            else:
+                transcript_parts.insert(0, "[... earlier parts truncated ...]\n\n")
+                break
+        transcript = "".join(transcript_parts)
+
+        # Format the new prompt
+        prompt = prompts.CONTENT_SCORE_PROMPT_TEMPLATE.format(transcript=transcript)
+
+        safety_settings = [
+            # ... (standard safety settings) ...
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        ]
+
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+
+        if not response.parts:
+            feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
+            block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
+            error_message = f"Content Score Gen: Empty/blocked. Reason: {block_reason}"
+            print(f"{ERROR_PREFIX}{error_message}")
+            result['error'] = f"Could not generate content score. Reason: {block_reason}"
+            return result
+
+        # --- Parse Score and Reasoning ---
+        generated_text = response.text.strip()
+        score = 0 # Default score
+        analysis_text = "Could not parse analysis from response."
+
+        # Use regex to find score reliably
+        score_match = re.search(r"Score:\s*(\d+)", generated_text, re.IGNORECASE)
+        if score_match:
+            try:
+                score = int(score_match.group(1))
+                score = max(0, min(100, score)) # Clamp score between 0-100
+            except ValueError:
+                print("Warning: Could not parse score number, using 0.")
+                score = 0
+
+        # Find reasoning part (everything after "Reasoning:")
+        reasoning_match = re.search(r"Reasoning:?\s*(.*)", generated_text, re.IGNORECASE | re.DOTALL)
+        if reasoning_match:
+            analysis_text = reasoning_match.group(1).strip()
+        elif not score_match: # If neither score nor reasoning header found, use full text
+             analysis_text = generated_text if generated_text else analysis_text
+
+
+        result['score'] = score
+        result['analysis_text'] = analysis_text
+        print(f"Content score generated: {score}")
+        return result
+
+    except Exception as e:
+        error_message = f"Generating content score/analysis: {e}"
+        print(f"{ERROR_PREFIX}{error_message}")
+        result['error'] = f"Could not generate content score.\nDetails: {e}"
+        return result
+    
+
+    
+# --- MODIFIED Function ---
+def generate_qualification_assessment(resume_text, job_desc_text, full_history, model_name=MODEL_NAME):
+    """
+    Generates an assessment of candidate qualifications against the job description.
+    Returns a dictionary containing:
+        'requirements': A list of requirement detail dictionaries (incl. evidence).
+        'overall_fit': A string with the overall fit assessment.
+        'error': An error message string if generation failed, otherwise None.
+    """
+    print(f"Generating qualification assessment (with evidence) using {model_name}...")
+    result_data = { "requirements": [], "overall_fit": None, "error": None }
+
+    if not job_desc_text:
+        result_data["error"] = "No job description provided, cannot perform assessment."
+        print(result_data["error"])
+        return result_data
+    if not resume_text:
+        result_data["error"] = "No resume text available, cannot perform assessment."
+        print(result_data["error"])
+        return result_data
+
+    try:
+        model = genai.GenerativeModel(model_name)
+        transcript = "N/A"
         if full_history:
+            transcript_parts = []
+            total_len = 0
+            max_len = 10000
             for item in reversed(full_history):
-                q_part = f"Interviewer Q: {item['q']}\n"
-                a_part = f"Candidate A: {item['a']}\n\n"
+                q_part = f"Interviewer Q: {item['q']}\n"; a_part = f"Candidate A: {item['a']}\n\n"
                 item_len = len(q_part) + len(a_part)
                 if total_len + item_len < max_len:
-                    transcript_parts.insert(0, a_part)
-                    transcript_parts.insert(0, q_part)
+                    transcript_parts.insert(0, a_part); transcript_parts.insert(0, q_part)
                     total_len += item_len
                 else:
-                    transcript_parts.insert(0, "[... earlier parts truncated ...]\n\n")
-                    break
+                    transcript_parts.insert(0, "[... earlier parts truncated ...]\n\n"); break
             transcript = "".join(transcript_parts)
-        else:
-            transcript = "N/A (No interview conducted or history available)"
 
-        # --- UPDATED PROMPT ---
-        prompt = f"""
-        Act as a meticulous recruiter evaluating a candidate's potential fit for a specific role. Your task is to synthesize information ONLY from the provided Job Description, Candidate's Resume, and Interview Transcript to assess alignment with the key requirements.
-
-        Job Description (JD):
-        ---
-        {job_desc_text}
-        ---
-        Candidate's Resume (R):
-        ---
-        {resume_text}
-        ---
-        Interview Transcript (T):
-        ---
-        {transcript}
-        ---
-
-        Provide the following assessment using simple Markdown for formatting (e.g., **bold** for headings, `-` for list items):
-
-        **1. Alignment with Key Requirements:**
-            *   Identify 5-7 key requirements from the JD.
-            *   For each requirement:
-                - **Requirement:** [Requirement text from JD]
-                - **Assessment:** [Strong Match | Potential Match | Weak Match/Gap | Insufficient Information]
-                - **Evidence:** [Cite brief evidence from R and/or T, like "(R) Mentions X", "(T) Described Y"]
-
-        **2. Overall Fit Assessment (Based on Provided Info):**
-            *   Conclusion on potential fit for the role (e.g., Strong, Potential, Unlikely).
-            *   Brief reasoning highlighting key strengths/gaps relative to JD requirements.
-
-        Base your assessment ONLY on the provided text (JD, R, T).
-        """
-        # --- END UPDATED PROMPT ---
+        prompt = prompts.QUALIFICATION_ASSESSMENT_PROMPT_TEMPLATE.format(
+            job_desc_text=job_desc_text,
+            resume_text=resume_text,
+            transcript=transcript
+        )
 
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -415,17 +402,80 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
         if not response.parts:
             feedback = response.prompt_feedback if hasattr(response, 'prompt_feedback') else "N/A"
             block_reason = getattr(feedback, 'block_reason', 'Unknown') if feedback != "N/A" else "Unknown"
-            safety_ratings_str = "\n".join([f"  - {rating.category}: {rating.probability}" for rating in getattr(feedback, 'safety_ratings', [])]) if feedback != "N/A" else "N/A"
-            error_message = f"Empty or blocked response for Qualification Assessment.\nReason: {block_reason}\nSafety Ratings:\n{safety_ratings_str}"
-            print(f"{ERROR_PREFIX}Qualification Assessment Generation: {error_message}")
-            return f"{ERROR_PREFIX}Could not generate assessment. Reason: {block_reason}"
+            error_message = f"Qualification Assessment Gen: Empty/blocked. Reason: {block_reason}"
+            print(f"{ERROR_PREFIX}{error_message}")
+            result_data["error"] = f"Could not generate assessment. Reason: {block_reason}"
+            return result_data
 
-        print("Qualification assessment generated.")
-        return response.text.strip() # Return the Markdown formatted text
+        print("Qualification assessment generated. Parsing response...")
+        full_assessment_text = response.text.strip()
+        requirements_list = []
+        overall_fit = "Overall fit assessment not found in response."
+
+        # --- REVERTED Regex (captures Evidence again) ---
+        req_pattern = re.compile(
+            r"^[ \t]*[\*-][ \t]+\*\*Requirement[:]*\*\*[ \t]*(.*?)\n"
+            r"\s*[\*-][ \t]+\*\*Assessment[:]*\*\*[ \t]*(.*?)\n"
+            r"\s*[\*-][ \t]+\*\*Evidence[:]*\*\*[ \t]*(.*?)" # Capture evidence text
+            r"(?=\n[ \t]*[\*-][ \t]+\*\*Requirement|\n\s*\*\*2\. Overall Fit|\Z)",
+            re.DOTALL | re.IGNORECASE | re.MULTILINE
+        )
+        # --- End REVERTED Regex ---
+
+        matches = list(req_pattern.finditer(full_assessment_text))
+        print(f"Found {len(matches)} potential requirement matches using regex (with evidence).")
+
+        for match in matches:
+            req_text = match.group(1).strip() if match.group(1) else "N/A"
+            assessment_level = match.group(2).strip() if match.group(2) else "N/A"
+            evidence_text = match.group(3).strip() if match.group(3) else "N/A" # Get evidence group
+
+            # --- Parse Evidence (Restored Logic) ---
+            resume_evidence = "N/A"
+            transcript_evidence = "N/A"
+            # Use non-capturing groups (?:...) in lookahead/lookbehind if needed, but simple search is usually fine
+            r_match = re.search(r'\(R\)\s*(.*?)(?=\(T\)|$)', evidence_text, re.IGNORECASE | re.DOTALL)
+            t_match = re.search(r'\(T\)\s*(.*?)(?=\(R\)|$)', evidence_text, re.IGNORECASE | re.DOTALL)
+
+            if r_match: resume_evidence = r_match.group(1).strip()
+            if t_match: transcript_evidence = t_match.group(1).strip()
+
+            # If markers not found but evidence exists, assign it primarily to Resume evidence for simplicity
+            if resume_evidence == "N/A" and transcript_evidence == "N/A" and evidence_text != "N/A":
+                print(f"Warning: Could not parse specific (R)/(T) evidence for: '{req_text}'. Using full text.")
+                resume_evidence = evidence_text # Assign full text here
+                transcript_evidence = "N/A"     # Keep transcript N/A
+            # --- End Parse Evidence ---
+
+            requirements_list.append({
+                "requirement": req_text,
+                "assessment": assessment_level,
+                "resume_evidence": resume_evidence,      # Store parsed evidence
+                "transcript_evidence": transcript_evidence # Store parsed evidence
+            })
+
+        # Extract Overall Fit section
+        overall_match = re.search(r'\*\*2\.?\s*Overall Fit Assessment.*?\*\*:?\s*(.*?)$', full_assessment_text, re.DOTALL | re.IGNORECASE)
+        if overall_match:
+            overall_fit = overall_match.group(1).strip()
+            print("Found Overall Fit section.")
+        else:
+             print("Warning: Could not find Overall Fit section using regex.")
+
+        if not requirements_list and not overall_match:
+             print(f"Warning: Could not parse requirements or overall fit from assessment text:\n{full_assessment_text}")
+             result_data["error"] = "Could not parse assessment structure from the generated text."
+
+        result_data["requirements"] = requirements_list
+        result_data["overall_fit"] = overall_fit
+
+        print(f"Parsed {len(requirements_list)} requirements successfully (with evidence).")
+        return result_data
 
     except Exception as e:
-        err_msg = f"Generating qualification assessment: {e}"
-        if "400" in str(e) and ("prompt" in str(e).lower() or "request payload" in str(e).lower() or "resource exhausted" in str(e).lower()):
-             err_msg += f"\n\n{ERROR_PREFIX}Error 400 or Resource Exhausted: The combined text (JD + Resume + Transcript) might be too large for the model's input limit ('{MODEL_NAME}'). Try with shorter inputs, fewer follow-ups, or a model with a larger context window if available."
+        err_msg = f"Generating/parsing qualification assessment: {e}"
+        if "400" in str(e) and ("prompt" in str(e).lower() or "resource exhausted" in str(e).lower()):
+             err_msg += f"\n{ERROR_PREFIX}Inputs might be too large for model ('{MODEL_NAME}')."
         print(f"{ERROR_PREFIX}{err_msg}")
-        return f"{ERROR_PREFIX}Could not generate assessment.\nDetails: {e}"
+        result_data["error"] = f"Could not generate or parse assessment.\nDetails: {e}"
+        return result_data

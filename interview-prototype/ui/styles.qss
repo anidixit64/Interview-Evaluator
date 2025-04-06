@@ -97,5 +97,87 @@ QLabel#statusBar {
     min-height: 18px;
 }
 
+/* --- Style for the score description text edit --- */
+QTextEdit#scoreDescriptionEdit {
+    background-color: #303030;
+    border: 1px solid #444444;
+    padding: 5px;
+    border-radius: 6px;
+}
+
+/* --- Style for the requirements scroll area --- */
+QScrollArea#requirementsScrollArea {
+    border: 1px solid #444444; /* Border around scroll area */
+    background-color: #2E2E2E; /* Background inside scroll area */
+    border-radius: 6px;
+}
+
+/* --- Style for individual requirement sections --- */
+QFrame#requirementSection {
+    background-color: #383838; /* Background for each requirement */
+    border: 1px solid #484848;
+    border-radius: 4px;
+    padding: 5px; /* Internal padding */
+}
+
+/* --- Style for evidence labels (Optional: make dimmer) --- */
+QLabel#evidenceLabel {
+    color: #BBBBBB; /* Slightly dimmer text for evidence */
+}
+
+
+/* --- Style for the score description text edit --- */
+QTextEdit#scoreDescriptionEdit {
+    background-color: #303030;
+    border: 1px solid #444444;
+    padding: 5px;
+    border-radius: 6px;
+}
+
+/* --- Style for the requirements scroll area --- */
+QScrollArea#requirementsScrollArea {
+    border: 1px solid #444444;
+    background-color: #2E2E2E;
+    border-radius: 6px;
+}
+
+/* --- Style for individual requirement sections (the outer frame) --- */
+QFrame#requirementSection {
+    background-color: #383838; /* Background for each requirement frame */
+    border: 1px solid #484848;
+    border-radius: 4px;
+    /* padding: 0px; No padding on the outer frame itself */
+    margin-bottom: 2px; /* Small gap below each section */
+}
+
+/* --- Style for the CLICKABLE summary part inside the requirement section --- */
+QWidget#requirementSummary {
+    background-color: transparent; /* Inherit from requirementSection by default */
+    border: none; /* No border on the summary part */
+    padding: 4px; /* Add padding inside the clickable area */
+}
+/* Optional: Add a hover effect */
+QWidget#requirementSummary:hover {
+    background-color: #4A4A4A; /* Slightly lighter on hover */
+}
+
+/* --- Style for the EXPANDED details part inside the requirement section --- */
+QWidget#requirementDetails {
+    background-color: #303030; /* Slightly different background for details */
+    border: none;
+    /* Padding is handled by its internal layout margins */
+    /* Add top border for separation? */
+    border-top: 1px solid #484848;
+}
+
+/* --- Style for evidence labels inside the details part --- */
+QLabel#evidenceText {
+    color: #CCCCCC; /* Standard text color for evidence */
+    margin-left: 5px; /* Indent evidence text slightly */
+}
+QLabel.evidenceText { /* Allow styling by class if needed */
+    color: #CCCCCC;
+    margin-left: 5px;
+}
 
 /* Checkboxes use default theme style */
