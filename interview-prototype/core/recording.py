@@ -240,6 +240,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                         text = _recognizer.recognize_google(audio)
                         print(f"Recording Handler (STT): Recognized: '{text}'")
                         stt_result_queue.put(f"STT_Success: {text}")
+                        
                     except sr.UnknownValueError:
                         print("Recording Handler (STT): Google Web Speech API could not understand audio")
                         stt_result_queue.put("STT_Error: Could not understand audio.")

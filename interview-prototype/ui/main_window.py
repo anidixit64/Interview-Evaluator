@@ -651,7 +651,7 @@ class InterviewApp(QWidget):
         if extracted_content is None:
              self.show_message_box("error", "PDF Error", f"Failed to extract text from '{filename}'.")
              if self.setup_page_instance:
-                 self.setup_page_instance.show_selection_state(None)
+                 self.setup_page_instance.show_resume_selection_state(None)
              if self.pdf_filepath == managed_path_str:
                  self.pdf_filepath = None
                  self.resume_content = ""
@@ -665,7 +665,7 @@ class InterviewApp(QWidget):
         self.set_setup_controls_state(True)
         self._add_recent_resume(custom_name, managed_path_str)
         if self.setup_page_instance:
-            self.setup_page_instance.show_selection_state(managed_path_str, custom_name)
+            self.setup_page_instance.show_resume_selection_state(managed_path_str, custom_name)
 
     def _handle_openai_tts_change(self, check_state_value):
         checkbox = getattr(self.setup_page_instance, 'openai_tts_checkbox', None)
