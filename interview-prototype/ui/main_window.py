@@ -2,7 +2,7 @@
 """
 Main application window for the Interview Bot Pro.
 Manages pages, state, and core interactions. Adheres to style guidelines.
-Removes pop-up confirmation after saving transcript.
+Ensures webcam feed persists on InterviewPage while STT mode is active.
 """
 import os
 import sys
@@ -13,6 +13,9 @@ import html
 import json
 import shutil
 from pathlib import Path
+import numpy as np
+import cv2
+import threading
 
 # --- PyQt6 Imports ---
 from PyQt6.QtWidgets import (
@@ -22,7 +25,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import (
     QFont, QPalette, QColor, QTextCursor, QCursor, QIcon, QPixmap,
-    QDesktopServices
+    QDesktopServices, QImage
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QSize, pyqtSignal, QUrl, QStandardPaths
@@ -43,6 +46,7 @@ except ImportError:
 from .setup_page import SetupPage
 from .interview_page import InterviewPage
 from .results_page import ResultsPage
+from .loading_page import LoadingPage
 from .results_page import FIXED_SPEECH_DESCRIPTION, FIXED_SPEECH_SCORE
 
 
@@ -51,13 +55,15 @@ CONFIG_FILE_NAME = "settings.json"
 RESUMES_SUBDIR = "resumes"
 MAX_RECENT_RESUMES = 10
 MAX_RECENT_JDS = 10
+WEBCAM_UPDATE_INTERVAL = 40
 
 
 class InterviewApp(QWidget):
     """Main application window for the Interview Bot Pro."""
     SETUP_PAGE_INDEX = 0
     INTERVIEW_PAGE_INDEX = 1
-    RESULTS_PAGE_INDEX = 2
+    LOADING_PAGE_INDEX = 2
+    RESULTS_PAGE_INDEX = 3
 
     def __init__(self, icon_path, *args, **kwargs):
         """Initializes the main application window."""
@@ -79,6 +85,13 @@ class InterviewApp(QWidget):
         self.stt_timer.timeout.connect(self.check_stt_queue)
         self.stt_timer.start(100)
 
+        self.webcam_frame_queue = queue.Queue(maxsize=5)
+        self.webcam_timer = QTimer(self)
+        self.webcam_timer.timeout.connect(self._update_webcam_view)
+        self.webcam_stream_thread = None
+        self.webcam_stream_stop_event = None
+
+    # --- Methods _setup_appearance to _add_recent_jd remain unchanged ---
     def _setup_appearance(self):
         """Sets the application's color palette and style."""
         palette = self.palette()
@@ -154,6 +167,7 @@ class InterviewApp(QWidget):
         self.config = {"recent_resumes": [], "recent_job_descriptions": []}
         self.setup_page_instance = None
         self.interview_page_instance = None
+        self.loading_page_instance = None
         self.results_page_instance = None
         self.progress_indicator_label = None
         self.status_bar_label = None
@@ -205,7 +219,6 @@ class InterviewApp(QWidget):
 
             needs_save = False
 
-            # Validate Recent Resumes
             if not isinstance(config.get("recent_resumes"), list):
                 print("Warning: 'recent_resumes' in config is not a list. Resetting.")
                 config["recent_resumes"] = []
@@ -234,7 +247,6 @@ class InterviewApp(QWidget):
                 if len(valid_resumes) != len(config.get("recent_resumes", [])):
                     config["recent_resumes"] = valid_resumes
 
-            # Validate Recent Job Descriptions
             if not isinstance(config.get("recent_job_descriptions"), list):
                 print("Warning: 'recent_job_descriptions' in config is not a list. Resetting.")
                 config["recent_job_descriptions"] = []
@@ -352,10 +364,12 @@ class InterviewApp(QWidget):
 
         self.setup_page_instance = SetupPage(self)
         self.interview_page_instance = InterviewPage(self)
+        self.loading_page_instance = LoadingPage(self)
         self.results_page_instance = ResultsPage(self)
 
         self.stacked_widget.addWidget(self.setup_page_instance)
         self.stacked_widget.addWidget(self.interview_page_instance)
+        self.stacked_widget.addWidget(self.loading_page_instance)
         self.stacked_widget.addWidget(self.results_page_instance)
 
         self.status_bar_label = QLabel("Ready.")
@@ -384,10 +398,10 @@ class InterviewApp(QWidget):
             self.setup_page_instance.set_controls_enabled_state(pdf_loaded, jd_loaded)
 
         current_page_index = self.stacked_widget.currentIndex() if self.stacked_widget else -1
-        if self.interview_page_instance and current_page_index == self.SETUP_PAGE_INDEX:
-            self.interview_page_instance.clear_fields()
-        if self.results_page_instance and current_page_index == self.SETUP_PAGE_INDEX:
-            self.results_page_instance.clear_fields()
+        if self.interview_page_instance and current_page_index != self.INTERVIEW_PAGE_INDEX:
+            self.interview_page_instance.clear_fields() # Clear if not on interview page
+        if self.results_page_instance and current_page_index != self.RESULTS_PAGE_INDEX:
+            self.results_page_instance.clear_fields() # Clear if not on results page
 
         self.update_status("Ready.")
         self.update_submit_button_text()
@@ -399,13 +413,22 @@ class InterviewApp(QWidget):
             return
 
         current_index = self.stacked_widget.currentIndex()
+        # Adjust step display based on current page index
+        if current_index == self.LOADING_PAGE_INDEX:
+            current_step_index = self.INTERVIEW_PAGE_INDEX # Show Interview active during loading
+        elif current_index == self.RESULTS_PAGE_INDEX:
+             current_step_index = self.RESULTS_PAGE_INDEX # Show Results active
+        else:
+             current_step_index = current_index # Match Setup or Interview directly
+
         steps = ["Step 1: Setup", "Step 2: Interview", "Step 3: Results"]
         progress_parts = []
         active_color = QColor("#FFA500").name()
         inactive_color = self.palette().color(QPalette.ColorRole.Text).name()
 
         for i, step in enumerate(steps):
-            if i == current_index:
+            is_active = (i == current_step_index)
+            if is_active:
                 progress_parts.append(
                     f'<font color="{active_color}"><b>{step}</b></font>'
                 )
@@ -420,6 +443,7 @@ class InterviewApp(QWidget):
     def _go_to_setup_page(self):
         """Navigates to the Setup page and resets the interview state."""
         print("Navigating to Setup Page and Resetting...")
+        self.stop_webcam_feed()
         self.reset_interview_state(clear_config=True)
         if self.stacked_widget:
             self.stacked_widget.setCurrentIndex(self.SETUP_PAGE_INDEX)
@@ -429,16 +453,33 @@ class InterviewApp(QWidget):
         print("Navigating to Interview Page...")
         if self.interview_page_instance:
             self.interview_page_instance.clear_fields()
+            self.interview_page_instance.set_input_mode(self.use_speech_input)
+            if self.use_speech_input:
+                self.start_webcam_feed()
+            else:
+                self.stop_webcam_feed()
+
         if self.stacked_widget:
             self.stacked_widget.setCurrentIndex(self.INTERVIEW_PAGE_INDEX)
         self._update_progress_indicator()
         self.update_status("Interview started. Waiting for question...")
+
+    def _go_to_loading_page(self):
+        """Navigates to the Loading page."""
+        print("Navigating to Loading Page...")
+        self.stop_webcam_feed()
+        self.update_status("Generating results...")
+        if self.stacked_widget:
+            self.stacked_widget.setCurrentIndex(self.LOADING_PAGE_INDEX)
+        self._update_progress_indicator()
+        QApplication.processEvents()
 
     def _go_to_results_page(self, summary: str | None,
                             assessment_data: dict | None,
                             content_score_data: dict | None):
         """Navigates to the Results page and displays results."""
         print("Navigating to Results Page...")
+        self.stop_webcam_feed()
         self.last_assessment_data = assessment_data
         self.last_content_score_data = content_score_data
 
@@ -651,8 +692,6 @@ class InterviewApp(QWidget):
         """Saves the full interview transcript to a text file."""
         if not self.current_full_interview_history:
             print("No history to save.")
-            # *** REMOVED show_message_box confirmation ***
-            # self.show_message_box("info", "No History", "No transcript to save.")
             return
 
         topic_index_map = {}
@@ -683,7 +722,7 @@ class InterviewApp(QWidget):
                     context = f"Topic {last_topic_num}" if last_topic_num > 0 else "General"
                     transcript_lines.append(f"\nFollow Up (re {context}): {q_raw}\nAnswer: {a}")
 
-            recordings_path = Path(RECORDINGS_DIR) # Use Path object
+            recordings_path = Path(RECORDINGS_DIR)
             os.makedirs(recordings_path, exist_ok=True)
             filepath = recordings_path / "transcript.txt"
             print(f"Saving transcript to {filepath}...")
@@ -694,8 +733,6 @@ class InterviewApp(QWidget):
 
             print("Transcript saved.")
             self.update_status(f"Transcript saved to {filepath.name}")
-            # *** REMOVED show_message_box confirmation ***
-            # self.show_message_box("info", "Transcript Saved", f"Saved to:\n{filepath}")
 
         except Exception as e:
             print(f"Error saving transcript: {e}")
@@ -850,6 +887,7 @@ class InterviewApp(QWidget):
         if self.setup_page_instance:
             self.setup_page_instance.show_resume_selection_state(managed_path_str)
 
+
     def _handle_openai_tts_change(self, check_state_value: int):
         """Handles the state change of the OpenAI TTS checkbox."""
         checkbox = getattr(self.setup_page_instance, 'openai_tts_checkbox', None)
@@ -901,10 +939,17 @@ class InterviewApp(QWidget):
             checkbox.blockSignals(False)
 
     def update_submit_button_text(self, check_state_value: int = None):
-        """Updates the submit/record button based on STT checkbox state."""
+        """Updates the submit/record button and input mode based on STT checkbox."""
         if check_state_value is not None:
             self.use_speech_input = (check_state_value == Qt.CheckState.Checked.value)
             print(f"Use Speech Input (STT) state changed to: {self.use_speech_input}")
+
+            if self.interview_page_instance and self.stacked_widget.currentIndex() == self.INTERVIEW_PAGE_INDEX:
+                self.interview_page_instance.set_input_mode(self.use_speech_input)
+                if self.use_speech_input:
+                    self.start_webcam_feed()
+                else:
+                    self.stop_webcam_feed()
 
         if not self.is_recording:
             self.set_recording_button_state('idle')
@@ -922,8 +967,7 @@ class InterviewApp(QWidget):
                 answer_input.setFocus()
                 answer_input.setPlaceholderText("Type your answer here...")
             elif not is_text_mode:
-                answer_input.clear()
-                answer_input.setPlaceholderText("Click 'Record Answer' to speak...")
+                answer_input.setPlaceholderText("Webcam view active...")
             else:
                 answer_input.setPlaceholderText("Waiting for question or processing...")
 
@@ -1050,7 +1094,6 @@ class InterviewApp(QWidget):
 
         if not self.initial_questions:
             self.update_status("Error generating interview questions.", False)
-            # *** REMOVED show_message_box for generation error ***
             print("Failed to generate initial interview questions.")
             return
 
@@ -1089,24 +1132,44 @@ class InterviewApp(QWidget):
             self.display_question(raw_q_text)
         else:
             print("\n--- Interview Finished ---")
-            self.update_status("Generating results...", True)
             self.disable_interview_controls()
-            QApplication.processEvents()
-            self.save_transcript_to_file()
-            print("Generating summary review...")
-            summary = logic.generate_summary_review(self.current_full_interview_history)
-            print("Generating content score analysis...")
-            content_score_data = logic.generate_content_score_analysis(self.current_full_interview_history)
-            print("Generating qualification assessment...")
-            assessment_data = logic.generate_qualification_assessment(
-                self.resume_content, self.job_description_text, self.current_full_interview_history
-            )
-            self.update_status("Results ready.", False)
-            if summary is None or summary.startswith(logic.ERROR_PREFIX):
-                self.show_message_box("warning", "Summary Error", f"Could not generate summary.\n{summary or ''}")
-            if assessment_data.get("error") and self.job_description_text:
-                self.show_message_box("warning", "Assessment Error", f"Could not generate job fit assessment.\n{assessment_data.get('error', '')}")
-            self._go_to_results_page(summary, assessment_data, content_score_data)
+            self._go_to_loading_page() # <<< Go to Loading Page >>>
+            # Generate results after a short delay to allow UI update
+            QTimer.singleShot(100, self._start_results_generation)
+
+    def _start_results_generation(self):
+        """Generates results and navigates to the results page."""
+        print("Starting results generation process...")
+        self.update_status("Generating results...") # Keep status updated
+
+        # Perform potentially long-running tasks
+        self.save_transcript_to_file()
+        QApplication.processEvents() # Allow UI updates
+
+        print("Generating summary review...")
+        summary = logic.generate_summary_review(self.current_full_interview_history)
+        QApplication.processEvents()
+
+        print("Generating content score analysis...")
+        content_score_data = logic.generate_content_score_analysis(self.current_full_interview_history)
+        QApplication.processEvents()
+
+        print("Generating qualification assessment...")
+        assessment_data = logic.generate_qualification_assessment(
+            self.resume_content, self.job_description_text, self.current_full_interview_history
+        )
+        QApplication.processEvents()
+
+        self.update_status("Results ready.", False)
+
+        # Handle potential errors
+        if summary is None or summary.startswith(logic.ERROR_PREFIX):
+            self.show_message_box("warning", "Summary Error", f"Could not generate summary.\n{summary or ''}")
+        if assessment_data.get("error") and self.job_description_text:
+            self.show_message_box("warning", "Assessment Error", f"Could not generate job fit assessment.\n{assessment_data.get('error', '')}")
+
+        # Navigate to the final results page
+        self._go_to_results_page(summary, assessment_data, content_score_data)
 
     def handle_answer_submission(self):
         """Handles the submission of an answer, either text or recorded."""
@@ -1120,10 +1183,11 @@ class InterviewApp(QWidget):
             print("Record button clicked, starting STT...")
             self.disable_interview_controls(is_recording_stt=True)
             self.update_status_stt("STT_Status: Starting Mic...")
-            if answer_input:
-                answer_input.clear()
+            # Webcam feed should already be running if STT mode is active
+
             topic_idx = self.current_initial_q_index + 1
             followup_idx = self.follow_up_count
+            # Start the STT/Saving thread (no webcam queue passed)
             recording.start_speech_recognition(topic_idx, followup_idx)
         else:
             print("Submit button clicked, processing text answer.")
@@ -1162,11 +1226,13 @@ class InterviewApp(QWidget):
             display_message = f"[STT Warning: {detail}]"
             button_state = 'idle'
             self.is_recording = False
+            # Webcam is NOT stopped here, only when leaving page or toggling mode
         elif message.startswith("STT_Error:"):
             detail = message.split(':', 1)[1].strip()
             display_message = f"[STT Error: {detail}]"
             button_state = 'idle'
             self.is_recording = False
+            # Webcam is NOT stopped here
         elif message.startswith("STT_Success:"):
             display_message = "[Speech Recognized Successfully]"
             button_state = 'idle'
@@ -1183,20 +1249,14 @@ class InterviewApp(QWidget):
 
             if result.startswith(("STT_Status:", "STT_Warning:", "STT_Error:")):
                 self.update_status_stt(result)
+                # Re-enable controls AFTER error/warning displayed if not recording
                 if result.startswith(("STT_Warning:", "STT_Error:")) and not self.is_recording:
                     self.enable_interview_controls()
             elif result.startswith("STT_Success:"):
-                self.is_recording = False
-                self.update_status_stt(result)
+                self.is_recording = False # STT part is done
+                self.update_status_stt(result) # Show brief success
                 transcript = result.split(":", 1)[1].strip()
-                answer_input = getattr(self.interview_page_instance, 'answer_input', None)
-                if answer_input:
-                    answer_input.setEnabled(True)
-                    answer_input.setReadOnly(False)
-                    answer_input.setPlainText(transcript)
-                    answer_input.setReadOnly(True)
-                    answer_input.setEnabled(False)
-                self.process_answer(transcript)
+                self.process_answer(transcript) # Process answer (stops webcam)
         except queue.Empty:
             pass
         except Exception as e:
@@ -1205,10 +1265,14 @@ class InterviewApp(QWidget):
                 self.is_recording = False
                 self.set_recording_button_state('idle')
                 self.enable_interview_controls()
+                self.stop_webcam_feed() # Stop webcam on unexpected error
             self.update_status(f"Error checking speech recognition: {e}")
 
     def process_answer(self, user_answer: str):
         """Processes the user's answer and generates the next question."""
+        # *** Webcam feed is NOT stopped here anymore ***
+        # It stops when navigating away or toggling STT mode off.
+
         last_q = self.last_question_asked or "[Unknown Question]"
         print(f"Processing answer for Q: '{last_q[:50]}...' -> A: '{user_answer[:50]}...'")
 
@@ -1230,7 +1294,6 @@ class InterviewApp(QWidget):
         proceed_to_next_topic = False
         if self.follow_up_count < self.max_follow_ups:
             try:
-                # Use argument names defined in logic.py
                 follow_up_q = logic.generate_follow_up_question(
                     context_question=self.current_topic_question,
                     user_answer=user_answer,
@@ -1239,13 +1302,10 @@ class InterviewApp(QWidget):
             except Exception as e:
                 print(f"ERROR calling generate_follow_up_question: {e}")
                 follow_up_q = None
-                # *** REMOVED show_message_box for generation error ***
                 print(f"Failed to generate follow-up question: {e}")
-
 
             self.update_status("", False)
 
-            # Compare result against literal string "[END TOPIC]"
             if follow_up_q and follow_up_q.strip() and follow_up_q != "[END TOPIC]":
                 self.follow_up_count += 1
                 print(f"Asking Follow-up Q ({self.follow_up_count}/{self.max_follow_ups}): {follow_up_q}")
@@ -1253,11 +1313,8 @@ class InterviewApp(QWidget):
             elif follow_up_q == "[END TOPIC]":
                 print("Model signalled end of topic.")
                 proceed_to_next_topic = True
-            else: # Includes None case from error handling
+            else:
                 print("Follow-up generation failed or invalid.")
-                # *** REMOVED show_message_box for generation error ***
-                # if follow_up_q is not None:
-                #     print("Moving to next topic due to failed/invalid follow-up.")
                 proceed_to_next_topic = True
         else:
             print(f"Max follow-ups ({self.max_follow_ups}) reached.")
@@ -1267,55 +1324,38 @@ class InterviewApp(QWidget):
         if proceed_to_next_topic:
             self.current_initial_q_index += 1
             self.follow_up_count = 0
-            self.start_next_topic()
+            self.start_next_topic() # Handles finishing or starting next
 
         if QApplication.overrideCursor() is not None:
             QApplication.restoreOverrideCursor()
 
+    # ... (_save_report, _open_recordings_folder methods unchanged) ...
     def _save_report(self):
         """Gathers results data and saves it to a text report file."""
         if not self.results_page_instance:
             self.show_message_box("warning", "Internal Error", "Results page not found.")
             return
-
-        content_score = 0
-        analysis = "N/A"
-        content_error = None
+        content_score = 0; analysis = "N/A"; content_error = None
         if self.last_content_score_data:
             content_score = self.last_content_score_data.get('score', 0)
             analysis = self.last_content_score_data.get('analysis_text', 'N/A')
             content_error = self.last_content_score_data.get('error')
-
-        assess_error = None
-        req_list = []
-        fit_text = "N/A"
+        assess_error = None; req_list = []; fit_text = "N/A"
         if self.last_assessment_data:
             assess_error = self.last_assessment_data.get("error")
             req_list = self.last_assessment_data.get("requirements", [])
             fit_text = self.last_assessment_data.get("overall_fit", "N/A")
-
         content_widget = getattr(self.results_page_instance, 'content_score_text_edit', None)
         placeholder_check = "*Content score analysis loading...*"
         current_text = content_widget.toPlainText().strip() if content_widget else ""
         if not self.last_content_score_data and not self.last_assessment_data and current_text == placeholder_check:
             self.show_message_box("warning", "No Data", "Results not generated yet.")
             return
-
-        report_lines = [
-            "Interview Report", f"{'='*16}\n",
-            f"Speech Delivery Score: {FIXED_SPEECH_SCORE}%", f"{'-'*23}",
-            FIXED_SPEECH_DESCRIPTION.replace('**', '').replace('*', ''), "\n",
-            f"Response Content Score: {content_score}%", f"{'-'*24}"
-        ]
-        if content_error:
-            report_lines.append(f"Content Analysis Error: {content_error}")
-        else:
-            report_lines.append(analysis.replace('**', '').replace('*', ''))
-        report_lines.append("\n")
-        report_lines.extend([f"Job Fit Analysis", f"{'-'*16}"])
-
-        if assess_error:
-            report_lines.append(f"Assessment Error: {assess_error}")
+        report_lines = [ "Interview Report", f"{'='*16}\n", f"Speech Delivery Score: {FIXED_SPEECH_SCORE}%", f"{'-'*23}", FIXED_SPEECH_DESCRIPTION.replace('**', '').replace('*', ''), "\n", f"Response Content Score: {content_score}%", f"{'-'*24}" ]
+        if content_error: report_lines.append(f"Content Analysis Error: {content_error}")
+        else: report_lines.append(analysis.replace('**', '').replace('*', ''))
+        report_lines.append("\n"); report_lines.extend([f"Job Fit Analysis", f"{'-'*16}"])
+        if assess_error: report_lines.append(f"Assessment Error: {assess_error}")
         elif req_list:
             for i, req in enumerate(req_list):
                 report_lines.append(f"\nRequirement {i+1}: {req.get('requirement', 'N/A')}")
@@ -1329,77 +1369,134 @@ class InterviewApp(QWidget):
             cleaned_fit = fit_text.replace('<b>','').replace('</b>','').replace('*','')
             if cleaned_fit != "N/A" and not cleaned_fit.startswith("*Assessment generation failed"):
                 report_lines.append(f"\nOverall Fit Assessment: {cleaned_fit}")
-
         report_content = "\n".join(report_lines)
-
         default_filename = "interview_report.txt"
-        if self.pdf_filepath:
-            base = Path(self.pdf_filepath).stem
-            default_filename = f"{base}_interview_report.txt"
+        if self.pdf_filepath: base = Path(self.pdf_filepath).stem; default_filename = f"{base}_interview_report.txt"
         recordings_path = Path(RECORDINGS_DIR)
-        try:
-            os.makedirs(recordings_path, exist_ok=True)
-        except OSError as e:
-            print(f"Warn: Cannot create save dir {recordings_path}: {e}")
-            recordings_path = Path.home()
+        try: os.makedirs(recordings_path, exist_ok=True)
+        except OSError as e: print(f"Warn: Cannot create save dir {recordings_path}: {e}"); recordings_path = Path.home()
         default_path = str(recordings_path / default_filename)
-
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "Save Interview Report", default_path, "Text Files (*.txt);;All Files (*)"
-        )
-
+        filepath, _ = QFileDialog.getSaveFileName( self, "Save Interview Report", default_path, "Text Files (*.txt);;All Files (*)" )
         if filepath:
             try:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(report_content)
+                with open(filepath, 'w', encoding='utf-8') as f: f.write(report_content)
                 self.update_status(f"Report saved to {os.path.basename(filepath)}.")
                 self.show_message_box("info", "Report Saved", f"Saved to:\n{filepath}")
-            except Exception as e:
-                print(f"Error saving report: {e}")
-                self.show_message_box("error", "Save Error", f"Could not save report:\n{e}")
-        else:
-            self.update_status("Report save cancelled.")
+            except Exception as e: print(f"Error saving report: {e}"); self.show_message_box("error", "Save Error", f"Could not save report:\n{e}")
+        else: self.update_status("Report save cancelled.")
 
     def _open_recordings_folder(self):
         """Opens the folder containing saved transcripts and recordings."""
-        recordings_path = Path(RECORDINGS_DIR)
-        folder_path_str = str(recordings_path)
+        recordings_path = Path(RECORDINGS_DIR); folder_path_str = str(recordings_path)
         print(f"Attempting to open user recordings folder: {folder_path_str}")
-
         if not recordings_path.exists():
-            try:
-                os.makedirs(recordings_path, exist_ok=True)
-                print(f"Created recordings directory: {recordings_path}")
-            except OSError as e:
-                print(f"Error creating recordings directory: {e}")
-                self.show_message_box("error", "Folder Error", f"Could not create recordings folder.")
-                self.update_status("Failed to create recordings folder.")
-                return
-
+            try: os.makedirs(recordings_path, exist_ok=True); print(f"Created recordings directory: {recordings_path}")
+            except OSError as e: print(f"Error creating recordings directory: {e}"); self.show_message_box("error", "Folder Error", f"Could not create recordings folder."); self.update_status("Failed to create recordings folder."); return
         url = QUrl.fromLocalFile(folder_path_str)
         if not QDesktopServices.openUrl(url):
-            print(f"QDesktopServices failed. Trying platform fallback...")
-            self.update_status("Opening folder (fallback)...")
+            print(f"QDesktopServices failed. Trying platform fallback..."); self.update_status("Opening folder (fallback)...")
             try:
                 system = platform.system()
-                if system == "Windows":
-                    subprocess.Popen(['explorer', os.path.normpath(folder_path_str)])
-                elif system == "Darwin":
-                    subprocess.Popen(["open", folder_path_str])
-                else:
-                    subprocess.Popen(["xdg-open", folder_path_str])
+                if system == "Windows": subprocess.Popen(['explorer', os.path.normpath(folder_path_str)])
+                elif system == "Darwin": subprocess.Popen(["open", folder_path_str])
+                else: subprocess.Popen(["xdg-open", folder_path_str])
                 self.update_status("Opened recordings folder (fallback).")
-            except FileNotFoundError:
-                cmd = "explorer" if system=="Windows" else ("open" if system=="Darwin" else "xdg-open")
-                print(f"Error: Command '{cmd}' not found.")
-                self.show_message_box("error", "Open Error", f"Could not find command '{cmd}'.")
-                self.update_status("Failed to open folder (command missing).")
-            except Exception as e:
-                print(f"Fallback open error: {e}")
-                self.show_message_box("error", "Open Error", f"Could not open folder: {e}")
-                self.update_status("Failed to open recordings folder.")
-        else:
-            self.update_status("Opened recordings folder.")
+            except FileNotFoundError: cmd = "explorer" if system=="Windows" else ("open" if system=="Darwin" else "xdg-open"); print(f"Error: Command '{cmd}' not found."); self.show_message_box("error", "Open Error", f"Could not find command '{cmd}'."); self.update_status("Failed to open folder (command missing).")
+            except Exception as e: print(f"Fallback open error: {e}"); self.show_message_box("error", "Open Error", f"Could not open folder: {e}"); self.update_status("Failed to open recordings folder.")
+        else: self.update_status("Opened recordings folder.")
+
+
+    # --- Webcam Feed Methods ---
+    def start_webcam_feed(self):
+        """Starts the dedicated webcam streaming thread and UI timer."""
+        if self.webcam_stream_thread is not None and self.webcam_stream_thread.is_alive():
+            print("Webcam feed already running.")
+            return
+
+        while not self.webcam_frame_queue.empty():
+            try: self.webcam_frame_queue.get_nowait()
+            except queue.Empty: break
+
+        print("Starting webcam streaming thread...")
+        self.webcam_stream_stop_event = threading.Event()
+        self.webcam_stream_thread = threading.Thread(
+            target=recording.stream_webcam,
+            args=(self.webcam_frame_queue, self.webcam_stream_stop_event),
+            daemon=True
+        )
+        self.webcam_stream_thread.start()
+
+        if not self.webcam_timer.isActive():
+            self.webcam_timer.start(WEBCAM_UPDATE_INTERVAL)
+
+    def stop_webcam_feed(self):
+        """Stops the webcam streaming thread and UI timer."""
+        if not self.webcam_stream_stop_event and not self.webcam_timer.isActive():
+            # Avoid printing stop message if it wasn't running
+            return
+
+        print("Stopping webcam feed...")
+        if self.webcam_timer.isActive():
+            self.webcam_timer.stop()
+            print("Webcam UI timer stopped.")
+
+        if self.webcam_stream_stop_event:
+            self.webcam_stream_stop_event.set()
+            print("Webcam stream stop event set.")
+
+        if self.webcam_stream_thread is not None:
+            print("Joining webcam stream thread...")
+            self.webcam_stream_thread.join(timeout=2.0)
+            if self.webcam_stream_thread.is_alive():
+                print("Webcam stream thread join timed out.")
+            else:
+                print("Webcam stream thread joined.")
+            self.webcam_stream_thread = None
+
+        self.webcam_stream_stop_event = None
+
+        while not self.webcam_frame_queue.empty():
+            try: self.webcam_frame_queue.get_nowait()
+            except queue.Empty: break
+
+        if self.interview_page_instance:
+            self.interview_page_instance.set_webcam_frame(None)
+        print("Webcam feed stopped.")
+
+
+    def _update_webcam_view(self):
+        """Gets a frame from the queue and displays it on the InterviewPage."""
+        if not self.interview_page_instance or not hasattr(self.interview_page_instance, 'webcam_view_label'):
+            return
+
+        try:
+            frame = self.webcam_frame_queue.get_nowait()
+
+            if frame is None:
+                print("Webcam view received None sentinel, stopping UI updates.")
+                self.stop_webcam_feed()
+                return
+
+            if isinstance(frame, np.ndarray):
+                try:
+                    rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = rgb_image.shape
+                    bytes_per_line = ch * w
+                    qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+                    qt_pixmap = QPixmap.fromImage(qt_image)
+                    self.interview_page_instance.set_webcam_frame(qt_pixmap)
+                except cv2.error as cv_err:
+                    print(f"OpenCV error during frame conversion: {cv_err}")
+                except Exception as conv_err:
+                    print(f"Error converting frame to QPixmap: {conv_err}")
+
+            elif frame is not None:
+                print(f"Webcam view received unexpected data type: {type(frame)}")
+
+        except queue.Empty:
+            pass
+        except Exception as e:
+            print(f"Error updating webcam view: {e}")
 
     def closeEvent(self, event):
         """Handles cleanup when the application window is closed."""
@@ -1409,9 +1506,10 @@ class InterviewApp(QWidget):
             self.stt_timer.stop()
             print("STT queue check timer stopped.")
 
+        self.stop_webcam_feed() # Ensure webcam stops cleanly
+
         if self.is_recording:
             print("Signalling recording thread to stop (if implemented)...")
-            # Add recording stop logic here if necessary
 
         print("Main window cleanup attempts complete.")
         event.accept()

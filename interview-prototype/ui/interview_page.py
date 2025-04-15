@@ -1,16 +1,15 @@
 # ui/interview_page.py
 """
 Defines the Interview Page QWidget for the Interview App.
-Displays the question number/status, the large left-justified question text,
-an answer input area that expands, and a submit button centered in
-a reserved space at the bottom.
+Displays question details, and switches between a webcam view (for STT)
+or a text input box (for typing).
 """
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTextEdit,
-    QGroupBox, QSizePolicy, QFrame, QSpacerItem
+    QGroupBox, QSizePolicy, QFrame, QSpacerItem, QStackedLayout # Added QStackedLayout
 )
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtGui import QFont, QIcon, QPixmap, QColor, QPainter # Added QPixmap, QColor, QPainter
 from PyQt6.QtCore import Qt, QSize
 
 # Import shared components
@@ -22,8 +21,7 @@ except ImportError:
 
 class InterviewPage(QWidget):
     """
-    The main interview page showing question details, expanding answer input,
-    and a submit button in a bottom reserved area.
+    The main interview page showing question details and either webcam feed or text input.
     """
     def __init__(self, parent_window, *args, **kwargs):
         """Initializes the InterviewPage."""
@@ -31,6 +29,8 @@ class InterviewPage(QWidget):
         self.parent_window = parent_window
         self._load_dynamic_icons()
         self._init_ui()
+        # Start in text input mode
+        self.set_input_mode(use_speech=False)
 
     def _load_dynamic_icons(self):
         """Load icons used for the submit/record button states."""
@@ -44,9 +44,8 @@ class InterviewPage(QWidget):
 
     def _init_ui(self):
         """Initialize the UI elements for the interview page."""
-        # --- Main Vertical Layout for the Page ---
         page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(20, 20, 20, 20) # Overall padding
+        page_layout.setContentsMargins(20, 20, 20, 20)
         page_layout.setSpacing(15) # Spacing between main sections
 
         pw = self.parent_window
@@ -60,30 +59,27 @@ class InterviewPage(QWidget):
         font_question_number = font_large_bold
         icon_size = getattr(pw, 'icon_size', QSize(20, 20))
 
-        # --- Question Number/Status Label ---
+        # --- Top Section (Question Number & Text) ---
         self.question_number_label = QLabel("Question -/-")
         self.question_number_label.setFont(font_question_number)
         self.question_number_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.question_number_label.setObjectName("questionNumberLabel")
-        page_layout.addWidget(self.question_number_label) # Add to top
+        page_layout.addWidget(self.question_number_label)
 
-        # --- Large Question Text Display Label ---
         self.question_text_label = QLabel("Waiting for question...")
         self.question_text_label.setFont(font_question_display)
         self.question_text_label.setWordWrap(True)
         self.question_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.question_text_label.setObjectName("questionTextLabel")
-        # Allow horizontal expansion, minimum vertical expansion
         self.question_text_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding
         )
-        page_layout.addWidget(self.question_text_label) # Add below number
+        page_layout.addWidget(self.question_text_label)
 
         # --- Separator ---
         line1 = QFrame()
         line1.setFrameShape(QFrame.Shape.HLine)
         line1.setFrameShadow(QFrame.Shadow.Sunken)
-        # Add separator with some spacing
         page_layout.addSpacerItem(
             QSpacerItem(20, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         )
@@ -92,36 +88,65 @@ class InterviewPage(QWidget):
             QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         )
 
-        # --- Answer Section ---
-        answer_label = QLabel("Your Answer:")
+        # --- Input Area (Stack: Webcam or Text Edit) ---
+        answer_label = QLabel("Your Answer:") # Label stays outside the stack
         answer_label.setFont(font_bold)
-        # Left-align the "Your Answer:" label
         answer_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        page_layout.addWidget(answer_label) # Add below separator
+        page_layout.addWidget(answer_label)
 
+        # Container for the stacked layout
+        self.input_area_container = QWidget()
+        self.input_area_stack = QStackedLayout(self.input_area_container)
+        self.input_area_stack.setContentsMargins(0,0,0,0)
+
+        # -- Webcam View --
+        self.webcam_view_label = QLabel("Webcam feed inactive")
+        self.webcam_view_label.setObjectName("webcamViewLabel")
+        self.webcam_view_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.webcam_view_label.setMinimumSize(320, 240) # Set a reasonable minimum size
+        # Make it black initially
+        placeholder_pixmap = QPixmap(self.webcam_view_label.minimumSize())
+        placeholder_pixmap.fill(QColor("black"))
+        # Optionally draw text on placeholder
+        painter = QPainter(placeholder_pixmap)
+        painter.setPen(QColor("grey"))
+        painter.setFont(font_default)
+        painter.drawText(placeholder_pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "Webcam View (STT Mode)")
+        painter.end()
+        self.webcam_view_label.setPixmap(placeholder_pixmap)
+        self.webcam_view_label.setSizePolicy(
+             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding # Expand vertically
+        )
+        # Add to stack (index 0)
+        self.input_area_stack.addWidget(self.webcam_view_label)
+
+        # -- Text Input --
         self.answer_input = QTextEdit()
-        self.answer_input.setPlaceholderText("Type answer or use record...")
+        self.answer_input.setPlaceholderText("Type answer here...")
         self.answer_input.setFont(font_default)
-        # Allow answer input to expand vertically and horizontally
         self.answer_input.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        # Assign stretch factor here to take up most space before bottom area
-        page_layout.addWidget(self.answer_input, stretch=8) # e.g., 80% of stretch
+        self.answer_input.setMinimumHeight(150) # Ensure decent minimum height
+        # Add to stack (index 1)
+        self.input_area_stack.addWidget(self.answer_input)
 
-        # --- Bottom Area (Submit Button Centered in Empty Space) ---
+        # Add the container with the stack to the main layout
+        # This allows the stack (and its content) to expand
+        page_layout.addWidget(self.input_area_container, stretch=8) # High stretch factor
+
+
+        # --- Bottom Area (Submit Button Centered) ---
         bottom_area_layout = QVBoxLayout()
-        bottom_area_layout.setContentsMargins(0, 15, 0, 0) # Add some top margin
+        bottom_area_layout.setContentsMargins(0, 15, 0, 0)
         bottom_area_layout.setSpacing(0)
 
-        # -- Submit Button Layout (Centered Horizontally) --
         self.submit_button = QPushButton("Submit Answer")
         self.submit_button.setObjectName("recordSubmitButton")
         self.submit_button.setIconSize(icon_size)
         self.submit_button.setFont(font_bold)
         self.submit_button.clicked.connect(pw.handle_answer_submission)
         self.submit_button.setFixedHeight(45)
-        # Don't let button expand horizontally
         self.submit_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
         button_centering_layout = QHBoxLayout()
@@ -129,16 +154,25 @@ class InterviewPage(QWidget):
         button_centering_layout.addWidget(self.submit_button)
         button_centering_layout.addStretch(1)
 
-        # Add button layout to the bottom area layout
         bottom_area_layout.addLayout(button_centering_layout)
-        # Add stretch below the button to create the empty space
-        bottom_area_layout.addStretch(1) # This stretch defines the empty space height visually
+        bottom_area_layout.addStretch(1) # Creates empty space below button
 
-        # Add the bottom area layout to the main page layout
-        # The stretch factor here determines its proportion relative to answer_input
-        page_layout.addLayout(bottom_area_layout, stretch=2) # e.g., 20% of stretch
+        # Add bottom area layout
+        page_layout.addLayout(bottom_area_layout, stretch=2) # Lower stretch factor
 
         self.setLayout(page_layout)
+
+    def set_input_mode(self, use_speech: bool):
+        """Switches the input area between webcam view and text edit."""
+        if not hasattr(self, 'input_area_stack'):
+            return # Avoid errors if UI not fully initialized
+
+        if use_speech:
+            self.input_area_stack.setCurrentIndex(0) # Index 0 is webcam view
+            print("InterviewPage: Switched to Webcam View")
+        else:
+            self.input_area_stack.setCurrentIndex(1) # Index 1 is text edit
+            print("InterviewPage: Switched to Text Input")
 
     def clear_fields(self):
         """Clears dynamic fields on this page."""
@@ -148,19 +182,32 @@ class InterviewPage(QWidget):
             self.question_text_label.setText("Waiting for question...")
         if hasattr(self, 'answer_input'):
             self.answer_input.clear()
+        # Reset webcam view to placeholder
+        if hasattr(self, 'webcam_view_label'):
+            placeholder_pixmap = QPixmap(self.webcam_view_label.minimumSize())
+            placeholder_pixmap.fill(QColor("black"))
+            painter = QPainter(placeholder_pixmap)
+            painter.setPen(QColor("grey"))
+            painter.setFont(getattr(self.parent_window, 'font_default', QFont()))
+            painter.drawText(placeholder_pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "Webcam View (STT Mode)")
+            painter.end()
+            self.webcam_view_label.setPixmap(placeholder_pixmap)
+
 
     def set_controls_enabled(self, enabled: bool, is_recording_stt: bool = False):
         """Enable or disable interview input controls."""
+        # Answer input is only enabled if NOT using speech and main controls are enabled
+        is_text_mode = not self.parent_window.use_speech_input
         if hasattr(self, 'answer_input'):
-            text_input_editable = not self.parent_window.use_speech_input
-            self.answer_input.setEnabled(enabled)
-            if enabled:
-                self.answer_input.setReadOnly(not text_input_editable)
-            else:
-                self.answer_input.setReadOnly(True)
+            self.answer_input.setEnabled(enabled and is_text_mode)
+            # Read-only state mirrors enabled state when in text mode
+            self.answer_input.setReadOnly(not (enabled and is_text_mode))
 
+        # Submit button is generally enabled unless recording/processing
         if hasattr(self, 'submit_button'):
             self.submit_button.setEnabled(enabled)
+
+        # Note: Webcam view itself doesn't need enabling/disabling, just showing/hiding
 
     def update_widgets_from_state(self):
         """Updates widgets based on parent_window's state."""
@@ -178,4 +225,25 @@ class InterviewPage(QWidget):
             self.question_number_label.setText(number_text)
         if hasattr(self, 'question_text_label'):
             self.question_text_label.setText(question_text)
-            self.question_text_label.updateGeometry() # Hint geometry change
+            self.question_text_label.updateGeometry()
+
+    def set_webcam_frame(self, pixmap: QPixmap | None):
+        """Sets the pixmap on the webcam view label."""
+        if hasattr(self, 'webcam_view_label'):
+            if pixmap and not pixmap.isNull():
+                # Scale pixmap smoothly while maintaining aspect ratio
+                self.webcam_view_label.setPixmap(pixmap.scaled(
+                    self.webcam_view_label.size(), # Scale to the label's current size
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                ))
+            else:
+                # Set placeholder if pixmap is None or invalid
+                 placeholder_pixmap = QPixmap(self.webcam_view_label.minimumSize())
+                 placeholder_pixmap.fill(QColor("black"))
+                 painter = QPainter(placeholder_pixmap)
+                 painter.setPen(QColor("grey"))
+                 painter.setFont(getattr(self.parent_window, 'font_default', QFont()))
+                 painter.drawText(placeholder_pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "No Signal / Stopped")
+                 painter.end()
+                 self.webcam_view_label.setPixmap(placeholder_pixmap)
