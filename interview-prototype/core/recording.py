@@ -8,6 +8,8 @@ import os
 import speech_recognition as sr
 import queue
 import cv2
+import parselmouth
+import subprocess
 from pathlib import Path # Use pathlib for robust path handling
 
 # --- Configuration ---
@@ -31,6 +33,40 @@ except Exception:
 RECORDINGS_DIR = os.path.join(_DOCUMENTS_DIR, _APP_NAME_FOR_DIRS, "recordings")
 
 print(f"Recording Handler: Using recordings directory: {RECORDINGS_DIR}")
+
+# -- Praat Configuration --
+PRAAT_EXECUTABLE = "praat"
+# Try to find the script relative to this file's directory or the executable's directory
+# Common structures:
+# 1. project/core/recording.py and project/scripts/extract_features.praat
+# 2. Packaged app structure where script is bundled.
+try:
+    # 1. Get the absolute path of this Python file
+    current_file = os.path.abspath(__file__)
+    print(f"[DEBUG] Current file path: {current_file}")
+
+    # 2. Go up one level to get project root
+    project_root = os.path.dirname(os.path.dirname(current_file))
+    print(f"[DEBUG] Project root determined as: {project_root}")
+
+    # 3. Build full path to the Praat script
+    PRAAT_SCRIPT_PATH = os.path.join(project_root, "scripts", "extract_features.praat")
+    print(f"[DEBUG] Full path to Praat script: {PRAAT_SCRIPT_PATH}")
+
+    # 4. Check if file exists at that path
+    if not os.path.isfile(PRAAT_SCRIPT_PATH):
+        print(f"[DEBUG] File does NOT exist at: {PRAAT_SCRIPT_PATH}")
+        PRAAT_SCRIPT_PATH = None
+    else:
+        print(f"[DEBUG] File FOUND at: {PRAAT_SCRIPT_PATH}")
+
+except Exception as e:
+    PRAAT_SCRIPT_PATH = None
+    print(f"Recording Handler (Praat) Warning: Error determining Praat script path: {e}. Feature extraction will be skipped.")
+
+# 5. Final flag for enabling/disabling feature extraction
+PRAAT_FEATURE_EXTRACTION_ENABLED = PRAAT_SCRIPT_PATH is not None
+print(f"[DEBUG] Feature extraction enabled: {PRAAT_FEATURE_EXTRACTION_ENABLED}")
 # --- END MODIFICATION ---
 
 # --- Video Recording Configuration ---
@@ -102,6 +138,75 @@ def _record_video_loop(video_capture, video_writer, stop_event, filename, target
         actual_recorded_fps = frames_written / duration if duration > 0 else 0
         print(f"Recording Handler (Video): Stopping video recording loop for {filename}. Wrote {frames_written} frames in {duration:.2f}s (~{actual_recorded_fps:.1f} FPS recorded). Target playback FPS: {target_fps}")
 
+def extract_features(audio_path, praat_executable_path, praat_script_path):
+    if not os.path.isfile(audio_path):
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    if not os.path.isfile(praat_script_path):
+        raise FileNotFoundError(f"Praat script not found: {praat_script_path}")
+
+    features = {}
+    print(f"Recording Handler (Praat): Extracting features from '{os.path.basename(audio_path)}' using script '{os.path.basename(praat_script_path)}'...")
+    
+    try:
+        # Use '--run' which exits Praat after running the script
+        # Pass the audio file path as an argument to the script
+        # Praat script needs to be written to accept this argument (e.g., `form`, `Read from file...`, `arguments$()`)
+        command = [praat_executable_path, '--run', praat_script_path, audio_path]
+        print(f"Recording Handler (Praat): Running command: {' '.join(command)}") # Log the command being run
+
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False, # Don't raise exception on non-zero exit code, check manually
+            encoding='utf-8' # Specify encoding
+        )
+
+        # Check for errors during execution
+        if result.returncode != 0:
+            raise RuntimeError(f"Praat script execution failed with exit code {result.returncode}. Stderr: {result.stderr.strip()}")
+
+        # Parse the output (assuming script prints 'key=value' pairs, one per line)
+        output = result.stdout.strip()
+        if not output:
+             print("Recording Handler (Praat) Warning: Praat script produced no standard output.")
+             return {} # Return empty if no output
+
+        print(f"Recording Handler (Praat): Raw script output:\n---\n{output}\n---") # Log raw output for debugging
+
+        for line in output.splitlines(): # Split by newline
+            line = line.strip()
+            if '=' in line:
+                parts = line.split('=', 1) # Split only on the first '='
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value_str = parts[1].strip()
+                    try:
+                        features[key] = float(value_str)
+                    except ValueError:
+                        print(f"Recording Handler (Praat) Warning: Could not convert value '{value_str}' to float for key '{key}'. Skipping.")
+                else:
+                     print(f"Recording Handler (Praat) Warning: Skipping malformed output line (expected 'key=value'): '{line}'")
+            # else: # Optional: log lines that don't contain '=' if needed for debug
+            #      print(f"Recording Handler (Praat) Debug: Skipping output line without '=': '{line}'")
+
+
+        if not features:
+             print("Recording Handler (Praat) Warning: No features extracted. Check script output format (needs 'key=value' lines).")
+
+        print(f"Recording Handler (Praat): Successfully extracted {len(features)} features.")
+        return features
+
+    except FileNotFoundError:
+        # Specific error if praat executable itself is not found
+        print(f"Recording Handler (Praat) Error: Praat executable '{praat_executable_path}' not found or not executable. Make sure Praat is installed and in your system's PATH or provide the full path.")
+        raise # Re-raise to signal critical failure
+    except Exception as e:
+        print(f"Recording Handler (Praat) Error during feature extraction: {e}")
+        raise RuntimeError(f"Feature extraction failed: {e}") from e
+
+
+
 
 def _recognize_speech_thread(topic_idx, follow_up_idx):
     """
@@ -121,6 +226,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
     video_filepath = None
     video_recording_started = False
     audio_processing_done = False
+    extracted_audio_features = None
 
     try:
         # Ensure user-specific directory exists before recording
@@ -212,6 +318,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                     # Listen with timeout and phrase limit
                     audio = _recognizer.listen(source, timeout=5, phrase_time_limit=30)
                     print("Recording Handler (STT): Audio captured.")
+
                 except sr.WaitTimeoutError:
                     print("Recording Handler (STT): No speech detected within timeout.")
                     stt_result_queue.put("STT_Error: No speech detected.")
@@ -229,6 +336,35 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                         with open(audio_filepath, "wb") as f:
                             f.write(wav_data)
                         print(f"Recording Handler (STT): Audio saved successfully.")
+
+                        if PRAAT_FEATURE_EXTRACTION_ENABLED and audio_filepath:
+                             try:
+                                 # Make sure the file handle is closed before Praat tries to access it
+                                 extracted_audio_features = extract_features(audio_filepath, PRAAT_EXECUTABLE, PRAAT_SCRIPT_PATH)
+                                 if extracted_audio_features:
+                                     print(f"Recording Handler (Praat): Extracted Features for {audio_filename}:")
+                                     # You can format this output better if needed
+                                     for key, val in extracted_audio_features.items():
+                                         print(f"  - {key}: {val:.4f}")
+                                     # TODO: Decide what to do with features (save to file, queue, database?)
+                                     # Example: Put on queue (requires modifying queue consumer)
+                                     # stt_result_queue.put({"type": "features", "topic": topic_idx, "follow_up": follow_up_idx, "data": extracted_audio_features})
+                                 else:
+                                     print(f"Recording Handler (Praat): No features were extracted for {audio_filename}.")
+
+                             except FileNotFoundError:
+                                 print(f"Recording Handler (Praat) Error: Cannot run feature extraction. Praat executable or script not found. Disabling for this session.")
+                                 # Optionally disable future attempts if this is critical
+                                 # global PRAAT_FEATURE_EXTRACTION_ENABLED
+                                 # PRAAT_FEATURE_EXTRACTION_ENABLED = False
+                             except RuntimeError as praat_err:
+                                 # Catch errors from Praat script execution/parsing
+                                 print(f"Recording Handler (Praat) Error: Failed to extract features for {audio_filename}: {praat_err}")
+                             except Exception as feat_err:
+                                 # Catch any other unexpected errors during feature extraction
+                                 print(f"Recording Handler (Praat) Error: Unexpected error during feature extraction for {audio_filename}: {feat_err}")
+                        elif not PRAAT_FEATURE_EXTRACTION_ENABLED:
+                            print("Recording Handler (Praat): Feature extraction is disabled (script not found or configured).")
                     except Exception as save_err:
                         print(f"Recording Handler (STT) Warning: Failed to save audio file {audio_filename}: {save_err}")
 
@@ -240,7 +376,8 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                         text = _recognizer.recognize_google(audio)
                         print(f"Recording Handler (STT): Recognized: '{text}'")
                         stt_result_queue.put(f"STT_Success: {text}")
-                        
+
+
                     except sr.UnknownValueError:
                         print("Recording Handler (STT): Google Web Speech API could not understand audio")
                         stt_result_queue.put("STT_Error: Could not understand audio.")
