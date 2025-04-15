@@ -1,148 +1,181 @@
 # ui/interview_page.py
 """
 Defines the Interview Page QWidget for the Interview App.
+Displays the question number/status, the large left-justified question text,
+an answer input area that expands, and a submit button centered in
+a reserved space at the bottom.
 """
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTextEdit,
-    QGroupBox, QSizePolicy, QFrame
+    QGroupBox, QSizePolicy, QFrame, QSpacerItem
 )
-from PyQt6.QtGui import QFont, QIcon # Added QIcon
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtCore import Qt, QSize
 
 # Import shared components
-from .components import _load_icon
+try:
+    from .components import _load_icon
+except ImportError:
+    from ui.components import _load_icon
+
 
 class InterviewPage(QWidget):
     """
-    The main interview page showing question, answer input, and history.
+    The main interview page showing question details, expanding answer input,
+    and a submit button in a bottom reserved area.
     """
     def __init__(self, parent_window, *args, **kwargs):
+        """Initializes the InterviewPage."""
         super().__init__(parent=parent_window, *args, **kwargs)
         self.parent_window = parent_window
-        # Load icons needed for dynamic button state changes
         self._load_dynamic_icons()
         self._init_ui()
 
     def _load_dynamic_icons(self):
         """Load icons used for the submit/record button states."""
         pw = self.parent_window
-        # Load and store icons on this page instance
-        self.submit_icon = _load_icon(pw.icon_path, "send.png")
-        self.record_icon = _load_icon(pw.icon_path, "mic_black_36dp.png")
-        self.listening_icon = _load_icon(pw.icon_path, "record_wave.png")
-        self.processing_icon = _load_icon(pw.icon_path, "spinner.png")
+        icon_path = getattr(pw, 'icon_path', 'icons')
+
+        self.submit_icon = _load_icon(icon_path, "send.png")
+        self.record_icon = _load_icon(icon_path, "mic_black_36dp.png")
+        self.listening_icon = _load_icon(icon_path, "record_wave.png")
+        self.processing_icon = _load_icon(icon_path, "spinner.png")
 
     def _init_ui(self):
         """Initialize the UI elements for the interview page."""
+        # --- Main Vertical Layout for the Page ---
         page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(15, 15, 15, 15)
-        page_layout.setSpacing(15)
+        page_layout.setContentsMargins(20, 20, 20, 20) # Overall padding
+        page_layout.setSpacing(15) # Spacing between main sections
 
-        pw = self.parent_window # Shortcut
+        pw = self.parent_window
 
-        # --- Interview Area ---
-        interview_group = QGroupBox("Interview")
-        interview_group.setFont(pw.font_large_bold)
-        interview_layout = QVBoxLayout(interview_group)
-        interview_layout.setSpacing(10)
+        # --- Fonts ---
+        font_large_bold = getattr(pw, 'font_large_bold', QFont("Arial", 12, QFont.Weight.Bold))
+        font_bold = getattr(pw, 'font_bold', QFont("Arial", 10, QFont.Weight.Bold))
+        font_default = getattr(pw, 'font_default', QFont("Arial", 10))
+        base_size = font_default.pointSize()
+        font_question_display = QFont(font_default.family(), base_size + 14)
+        font_question_number = font_large_bold
+        icon_size = getattr(pw, 'icon_size', QSize(20, 20))
 
-        current_q_label = QLabel("Interviewer Question:")
-        current_q_label.setFont(pw.font_bold)
-        # Assign widgets to self
-        self.current_q_text = QTextEdit()
-        self.current_q_text.setReadOnly(True)
-        self.current_q_text.setFont(pw.font_default)
-        self.current_q_text.setObjectName("interviewerQuestion")
-        self.current_q_text.setMinimumHeight(80)
-        self.current_q_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        # --- Question Number/Status Label ---
+        self.question_number_label = QLabel("Question -/-")
+        self.question_number_label.setFont(font_question_number)
+        self.question_number_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.question_number_label.setObjectName("questionNumberLabel")
+        page_layout.addWidget(self.question_number_label) # Add to top
 
+        # --- Large Question Text Display Label ---
+        self.question_text_label = QLabel("Waiting for question...")
+        self.question_text_label.setFont(font_question_display)
+        self.question_text_label.setWordWrap(True)
+        self.question_text_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.question_text_label.setObjectName("questionTextLabel")
+        # Allow horizontal expansion, minimum vertical expansion
+        self.question_text_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding
+        )
+        page_layout.addWidget(self.question_text_label) # Add below number
+
+        # --- Separator ---
         line1 = QFrame()
         line1.setFrameShape(QFrame.Shape.HLine)
         line1.setFrameShadow(QFrame.Shadow.Sunken)
+        # Add separator with some spacing
+        page_layout.addSpacerItem(
+            QSpacerItem(20, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        )
+        page_layout.addWidget(line1)
+        page_layout.addSpacerItem(
+            QSpacerItem(20, 10, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        )
 
+        # --- Answer Section ---
         answer_label = QLabel("Your Answer:")
-        answer_label.setFont(pw.font_bold)
+        answer_label.setFont(font_bold)
+        # Left-align the "Your Answer:" label
+        answer_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        page_layout.addWidget(answer_label) # Add below separator
+
         self.answer_input = QTextEdit()
         self.answer_input.setPlaceholderText("Type answer or use record...")
-        self.answer_input.setFont(pw.font_default)
-        self.answer_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.answer_input.setFont(font_default)
+        # Allow answer input to expand vertically and horizontally
+        self.answer_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        # Assign stretch factor here to take up most space before bottom area
+        page_layout.addWidget(self.answer_input, stretch=8) # e.g., 80% of stretch
 
-        # Submit/Record Button
-        self.submit_button = QPushButton("Submit Answer") # Initial text
+        # --- Bottom Area (Submit Button Centered in Empty Space) ---
+        bottom_area_layout = QVBoxLayout()
+        bottom_area_layout.setContentsMargins(0, 15, 0, 0) # Add some top margin
+        bottom_area_layout.setSpacing(0)
+
+        # -- Submit Button Layout (Centered Horizontally) --
+        self.submit_button = QPushButton("Submit Answer")
         self.submit_button.setObjectName("recordSubmitButton")
-        # Initial icon set by parent_window logic (update_submit_button_text/set_recording_button_state)
-        self.submit_button.setIconSize(pw.icon_size)
-        self.submit_button.setFont(pw.font_bold)
-        self.submit_button.clicked.connect(pw.handle_answer_submission) # Connect to parent's slot
-        self.submit_button.setFixedHeight(35)
-        submit_button_layout = QHBoxLayout()
-        submit_button_layout.addStretch()
-        submit_button_layout.addWidget(self.submit_button)
-        submit_button_layout.addStretch()
+        self.submit_button.setIconSize(icon_size)
+        self.submit_button.setFont(font_bold)
+        self.submit_button.clicked.connect(pw.handle_answer_submission)
+        self.submit_button.setFixedHeight(45)
+        # Don't let button expand horizontally
+        self.submit_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
-        interview_layout.addWidget(current_q_label)
-        interview_layout.addWidget(self.current_q_text)
-        interview_layout.addWidget(line1)
-        interview_layout.addWidget(answer_label)
-        interview_layout.addWidget(self.answer_input)
-        interview_layout.addLayout(submit_button_layout)
+        button_centering_layout = QHBoxLayout()
+        button_centering_layout.addStretch(1)
+        button_centering_layout.addWidget(self.submit_button)
+        button_centering_layout.addStretch(1)
 
-        page_layout.addWidget(interview_group, stretch=3)
+        # Add button layout to the bottom area layout
+        bottom_area_layout.addLayout(button_centering_layout)
+        # Add stretch below the button to create the empty space
+        bottom_area_layout.addStretch(1) # This stretch defines the empty space height visually
 
-        # --- Separator ---
-        line2 = QFrame()
-        line2.setFrameShape(QFrame.Shape.HLine)
-        line2.setFrameShadow(QFrame.Shadow.Sunken)
-        page_layout.addWidget(line2)
-
-        # --- History/Transcript Area ---
-        history_group = QGroupBox("Transcript")
-        history_group.setFont(pw.font_large_bold)
-        history_layout = QVBoxLayout(history_group)
-        self.history_text = QTextEdit()
-        self.history_text.setReadOnly(True)
-        self.history_text.setFont(pw.font_history)
-        self.history_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        history_layout.addWidget(self.history_text)
-        page_layout.addWidget(history_group, stretch=2)
+        # Add the bottom area layout to the main page layout
+        # The stretch factor here determines its proportion relative to answer_input
+        page_layout.addLayout(bottom_area_layout, stretch=2) # e.g., 20% of stretch
 
         self.setLayout(page_layout)
 
     def clear_fields(self):
         """Clears dynamic fields on this page."""
-        if hasattr(self, 'current_q_text'): self.current_q_text.clear()
-        if hasattr(self, 'answer_input'): self.answer_input.clear()
-        if hasattr(self, 'history_text'): self.history_text.clear()
+        if hasattr(self, 'question_number_label'):
+            self.question_number_label.setText("Question -/-")
+        if hasattr(self, 'question_text_label'):
+            self.question_text_label.setText("Waiting for question...")
+        if hasattr(self, 'answer_input'):
+            self.answer_input.clear()
 
-    def set_controls_enabled(self, enabled, is_recording_stt=False):
+    def set_controls_enabled(self, enabled: bool, is_recording_stt: bool = False):
         """Enable or disable interview input controls."""
         if hasattr(self, 'answer_input'):
-            text_input_enabled = not self.parent_window.use_speech_input
-            # Enable widget, but set read-only based on mode if enabled=True
+            text_input_editable = not self.parent_window.use_speech_input
             self.answer_input.setEnabled(enabled)
             if enabled:
-                self.answer_input.setReadOnly(not text_input_enabled)
+                self.answer_input.setReadOnly(not text_input_editable)
             else:
-                 self.answer_input.setReadOnly(True) # Always read-only when disabled
+                self.answer_input.setReadOnly(True)
 
         if hasattr(self, 'submit_button'):
             self.submit_button.setEnabled(enabled)
 
-        # Update button state/icon if enabling/disabling (unless disabled for recording)
-        if not is_recording_stt:
-             # Let parent window handle button state update via set_recording_button_state
-             # which will access the icons stored here.
-             pass
-
     def update_widgets_from_state(self):
-        """Updates widgets based on parent_window's state (e.g., display question)."""
+        """Updates widgets based on parent_window's state."""
         pw = self.parent_window
-        if hasattr(self, 'current_q_text'):
-            # Only update if different to avoid resetting cursor/selection?
-            if self.current_q_text.toPlainText() != pw.last_question_asked:
-                 self.current_q_text.setPlainText(pw.last_question_asked)
+        if hasattr(self, 'question_text_label'):
+            if self.question_text_label.text() != pw.last_question_asked:
+                if pw.last_question_asked:
+                    self.question_text_label.setText(pw.last_question_asked)
+                else:
+                    self.question_text_label.setText("Waiting for question...")
 
-        # History is updated via parent_window.add_to_history which accesses self.history_text
-        # Answer input placeholder/focus is handled by parent_window methods like display_question
-        # Button state/text/icon is handled by parent_window.set_recording_button_state
+    def display_question_ui(self, number_text: str, question_text: str):
+        """Updates the UI labels with the new question details."""
+        if hasattr(self, 'question_number_label'):
+            self.question_number_label.setText(number_text)
+        if hasattr(self, 'question_text_label'):
+            self.question_text_label.setText(question_text)
+            self.question_text_label.updateGeometry() # Hint geometry change
