@@ -1,7 +1,7 @@
 /* ui/styles.qss */
 
 /* Global Rounded Corners for specific widget types */
-QLineEdit, QTextEdit, QPushButton {
+QLineEdit, QTextEdit, QPushButton, QToolButton { /* Added QToolButton */
     border-radius: 8px;
 }
 
@@ -34,6 +34,20 @@ QPushButton#adjustButton:hover { background-color: #F0F0F0; border-color: #88888
 QPushButton#adjustButton:pressed { background-color: #E0E0E0; border-color: #666666; }
 QPushButton#adjustButton:disabled { background-color: #EAEAEA; border-color: #C0C0C0; }
 QPushButton#recordSubmitButton { min-height: 30px; }
+
+/* --- Sidebar Toggle Button --- */
+QToolButton#sidebarToggleButton {
+    background-color: transparent; /* Make background invisible */
+    border: none; /* No border */
+    padding: 2px;
+    border-radius: 4px; /* Slight rounding */
+}
+QToolButton#sidebarToggleButton:hover {
+    background-color: #4A4A4A; /* Highlight on hover */
+}
+QToolButton#sidebarToggleButton:pressed, QToolButton#sidebarToggleButton:checked {
+    background-color: #5A5A5A; /* Indicate pressed or active state */
+}
 
 
 /* --- Input/Text Area Styling --- */
@@ -180,69 +194,80 @@ QLabel.evidenceText { /* Allow styling by class if needed */
     margin-left: 5px;
 }
 
-/* --- Style for the Resume List --- */
-QListWidget#resumeList {
-    border: 1px solid #555555;
-    background-color: #303030; /* Slightly different bg */
+/* --- Setup Page Sidebar --- */
+QFrame#setupSidebar {
+    background-color: #2A2A2A; /* Darker background for sidebar */
+    border-right: 1px solid #555555; /* Separator line */
+}
+
+/* --- Setup Page Scroll Areas (Resume/JD in Main Content) --- */
+QScrollArea#resumeScrollArea, QScrollArea#jdScrollArea {
+    border: 1px solid #444444;
+    background-color: #2E2E2E;
     border-radius: 6px;
-    padding: 3px;
-    outline: 0; /* Remove focus outline if desired */
-}
-QListWidget#resumeList::item {
-    padding: 5px 8px; /* Spacing within items */
-    border-bottom: 1px solid #404040; /* Separator */
-    color: #E0E0E0; /* Text color */
-}
-QListWidget#resumeList::item:last-child {
-    border-bottom: none; /* No separator for last item */
-}
-/* Style for selected item */
-QListWidget#resumeList::item:selected {
-    background-color: #4285F4; /* Selection color (e.g., Google Blue) */
-    color: white;
-    border-radius: 3px; /* Slightly round selected item */
-    border-bottom-color: transparent; /* Hide separator below selected */
-}
-/* Style for hovered item (non-selected) */
-QListWidget#resumeList::item:!selected:hover {
-    background-color: #4A4A4A; /* Hover color */
-     border-radius: 3px;
+    /* Keep height constraints set in code */
 }
 
-QScrollArea#jdScrollArea {
-    border: 1px solid #444444
-    background-color: #2E2E2E
-    border-radius: 6px
-    min-height: 60px /* Adjust as needed */
+/* --- Style for individual Resume Widgets in Main Content --- */
+QFrame#resumeEntryWidget {
+    background-color: #383838;
+    border: 1px solid #484848;
+    border-radius: 4px;
+    min-height: 30px; /* Ensure minimum height */
+}
+QFrame#resumeEntryWidget:hover {
+    background-color: #4A4A4A;
+}
+/* Style for selected resume widget */
+QFrame#resumeEntryWidget[selected="true"] {
+     background-color: #4285F4; /* Use theme highlight color */
+     border: 1px solid #5396F5;
+}
+QFrame#resumeEntryWidget[selected="true"] QLabel#resumeNameLabel {
+    color: white; /* White text when selected */
+}
+QLabel#resumeNameLabel {
+    color: #E0E0E0; /* Default text color */
 }
 
-/* --- Style for individual JD Widgets --- */
+
+/* --- Style for individual JD Widgets in Main Content --- */
 QFrame#jdEntryWidget {
-    background-color: #383838
-    border: 1px solid #484848
-    border-radius: 4px
+    background-color: #383838;
+    border: 1px solid #484848;
+    border-radius: 4px;
+    min-height: 30px; /* Ensure minimum height */
 }
 QFrame#jdEntryWidget:hover {
-    background-color: #4A4A4A
+    background-color: #4A4A4A;
 }
+/* Style for selected JD widget */
 QFrame#jdEntryWidget[selected="true"] {
-     background-color: #007ACC /* Different selection color for JDs? */
-     border: 1px solid #3399DD
+     background-color: #007ACC; /* Different selection color for JDs? */
+     border: 1px solid #3399DD;
 }
 QFrame#jdEntryWidget[selected="true"] QLabel#jdNameLabel {
-    color: white
+    color: white;
 }
 QLabel#jdNameLabel {
-    color: #E0E0E0
+    color: #E0E0E0;
 }
 
-/* --- Style for the JD Display Text Edit --- */
+/* --- REMOVED Style for the JD Display Text Edit --- */
+/*
 QTextEdit#jdDisplayEdit {
-   border: 1px solid #555555
-   padding: 5px
-   background-color: #303030 /* Slightly darker/dimmer for read-only display */
-   color: #CCCCCC /* Dimmer text */
-   border-radius: 6px
+   border: 1px solid #555555;
+   padding: 5px;
+   background-color: #303030;
+   color: #CCCCCC;
+   border-radius: 6px;
+}
+*/
+
+/* Optional: Style for Status Labels inside Groups in Main Content */
+QLabel#resume_status_label, QLabel#jd_status_label {
+    padding: 3px;
+    color: #BBBBBB; /* Slightly dimmer status text */
 }
 
 

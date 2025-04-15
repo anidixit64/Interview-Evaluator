@@ -1,7 +1,7 @@
 # ui/jd_widget.py
 """
 Defines the JDWidget, a clickable widget for displaying
-and selecting a recently used Job Description.
+and selecting a recently used Job Description. Uses larger font.
 """
 
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QFrame
@@ -11,9 +11,8 @@ from PyQt6.QtCore import Qt, QSize, pyqtSignal
 class JDWidget(QFrame):
     """
     A clickable frame representing a single JD entry in the list.
-    Emits a signal with its data when clicked.
+    Emits a signal with its data when clicked. Uses larger font size.
     """
-    # Signal emitting the data dictionary {'name': str, 'text': str}
     jd_selected = pyqtSignal(dict)
 
     def __init__(self, jd_data: dict, parent_widget: QWidget, parent=None):
@@ -25,34 +24,37 @@ class JDWidget(QFrame):
         """
         super().__init__(parent)
         self.jd_data = jd_data
-        self.parent_widget = parent_widget # Usually the SetupPage
+        # parent_widget is SetupPage, parent_widget.parent_window is MainWindow
+        self.parent_window = parent_widget.parent_window
         self._is_selected = False
 
         # --- Appearance ---
-        self.setObjectName("jdEntryWidget") # For QSS styling
+        self.setObjectName("jdEntryWidget")
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setFrameShadow(QFrame.Shadow.Raised) # Default shadow
+        self.setFrameShadow(QFrame.Shadow.Raised)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self.setMinimumHeight(30) # Adjust height as needed
+        # Increase minimum height significantly for larger font
+        self.setMinimumHeight(55) # Increased height
 
         # --- Layout & Content ---
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5) # Padding
-        layout.setSpacing(10)
-
-        # TODO: Maybe a briefcase or document icon?
-        # icon_label = QLabel()
-        # icon_label.setPixmap(...)
-        # layout.addWidget(icon_label)
+         # Increased padding for larger text
+        layout.setContentsMargins(18, 10, 18, 10)
+        layout.setSpacing(15) # Increased spacing
 
         name = self.jd_data.get("name", "Unnamed Job Description")
-        text_preview = self.jd_data.get("text", "")[:80] + "..." # Show preview in tooltip
+        text_preview = self.jd_data.get("text", "")[:80] + "..."
 
         name_label = QLabel(name)
-        # Access font via parent_widget -> parent_window
-        name_label.setFont(self.parent_widget.parent_window.font_default)
-        name_label.setToolTip(f"Preview: {text_preview}") # Show preview on hover
+        # *** Use the XXL font from MainWindow ***
+        font_to_use = self.parent_window.font_default # Fallback
+        if hasattr(self.parent_window, 'font_default_xxl'):
+            font_to_use = self.parent_window.font_default_xxl
+        name_label.setFont(font_to_use) # Apply the large font
+
+        name_label.setToolTip(f"Preview: {text_preview}")
         name_label.setObjectName("jdNameLabel")
+        name_label.setWordWrap(True) # Allow wrapping
 
         layout.addWidget(name_label, stretch=1)
 
@@ -66,5 +68,6 @@ class JDWidget(QFrame):
         """Visually indicate if this widget is the currently selected JD."""
         self._is_selected = selected
         self.setProperty("selected", selected)
+        # Re-polish to apply QSS changes based on the 'selected' property
         self.style().unpolish(self)
         self.style().polish(self)
