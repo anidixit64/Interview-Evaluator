@@ -12,8 +12,8 @@ import sys
 from . import prompts # Relative import for prompts.py in the same directory
 
 # --- Default Configuration & Constants ---
-DEFAULT_NUM_TOPICS = 5
-DEFAULT_MAX_FOLLOW_UPS = 2
+DEFAULT_NUM_TOPICS = 1
+DEFAULT_MAX_FOLLOW_UPS = 0
 MIN_TOPICS = 1
 MAX_TOPICS = 10
 MIN_FOLLOW_UPS = 0
