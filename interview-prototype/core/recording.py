@@ -9,6 +9,8 @@ import speech_recognition as sr
 import queue
 import cv2
 import parselmouth
+from parselmouth.praat import call 
+import numpy as np
 import subprocess
 from pathlib import Path # Use pathlib for robust path handling
 
@@ -138,73 +140,276 @@ def _record_video_loop(video_capture, video_writer, stop_event, filename, target
         actual_recorded_fps = frames_written / duration if duration > 0 else 0
         print(f"Recording Handler (Video): Stopping video recording loop for {filename}. Wrote {frames_written} frames in {duration:.2f}s (~{actual_recorded_fps:.1f} FPS recorded). Target playback FPS: {target_fps}")
 
-def extract_features(audio_path, praat_executable_path, praat_script_path):
-    if not os.path.isfile(audio_path):
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
-    if not os.path.isfile(praat_script_path):
-        raise FileNotFoundError(f"Praat script not found: {praat_script_path}")
 
+def extract_features(audio_path):
+    """
+    Extracts acoustic features using the Parselmouth library (Praat wrapper).
+
+    Args:
+        audio_path (str): Path to the WAV audio file.
+
+    Returns:
+        dict: A dictionary containing the extracted features, or None if extraction fails.
+              Keys match the praat script output names where possible.
+    """
+    print(f"Recording Handler (Parselmouth): Extracting features from '{os.path.basename(audio_path)}'...")
     features = {}
-    print(f"Recording Handler (Praat): Extracting features from '{os.path.basename(audio_path)}' using script '{os.path.basename(praat_script_path)}'...")
-    
     try:
-        # Use '--run' which exits Praat after running the script
-        # Pass the audio file path as an argument to the script
-        # Praat script needs to be written to accept this argument (e.g., `form`, `Read from file...`, `arguments$()`)
-        command = [praat_executable_path, '--run', praat_script_path, audio_path]
-        print(f"Recording Handler (Praat): Running command: {' '.join(command)}") # Log the command being run
+        snd = parselmouth.Sound(audio_path)
+        duration = snd.get_total_duration()
+        features['duration'] = duration
 
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False, # Don't raise exception on non-zero exit code, check manually
-            encoding='utf-8' # Specify encoding
-        )
+        if duration <= 0:
+            print("Recording Handler (Parselmouth) Warning: Audio duration is zero or negative.")
+            return None # Cannot process zero duration
 
-        # Check for errors during execution
-        if result.returncode != 0:
-            raise RuntimeError(f"Praat script execution failed with exit code {result.returncode}. Stderr: {result.stderr.strip()}")
+        # --- Intensity ---
+        try:
+            intensity = snd.to_intensity(minimum_pitch=75.0) # Use a reasonable minimum pitch
+            features['intensityMean'] = call(intensity, "Get mean", 0, 0, "energy") # dB or energy? Energy is more standard.
+            # Calculate SD manually from values array for reliability
+            intensity_values = intensity.values[0] # Get the numpy array of intensity values
+            intensity_values_finite = intensity_values[np.isfinite(intensity_values)] # Filter out potential NaNs/Infs
+            if len(intensity_values_finite) > 1:
+                 features['intensitySD'] = np.std(intensity_values_finite, ddof=1)
+            else:
+                 features['intensitySD'] = 0.0
+            features['intensityMin'] = call(intensity, "Get minimum", 0, 0, "Parabolic")
+            features['intensityMax'] = call(intensity, "Get maximum", 0, 0, "Parabolic")
+            # Quantiles might need manual numpy calculation if 'call' is problematic
+            try:
+                 features['intensityQuant5'] = np.percentile(intensity_values_finite, 5) if len(intensity_values_finite) > 0 else 0
+                 features['intensityQuant95'] = np.percentile(intensity_values_finite, 95) if len(intensity_values_finite) > 0 else 0
+                 features['intensityMedian'] = np.median(intensity_values_finite) if len(intensity_values_finite) > 0 else 0
+            except IndexError: # Handle empty array after filtering
+                 features['intensityQuant5'] = 0; features['intensityQuant95'] = 0; features['intensityMedian'] = 0
 
-        # Parse the output (assuming script prints 'key=value' pairs, one per line)
-        output = result.stdout.strip()
-        if not output:
-             print("Recording Handler (Praat) Warning: Praat script produced no standard output.")
-             return {} # Return empty if no output
+        except parselmouth.PraatError as e:
+            print(f"Recording Handler (Parselmouth) Warning: Intensity analysis failed: {e}")
+            # Assign default 0s
+            features.update({k: 0 for k in ['intensityMean', 'intensitySD', 'intensityMin', 'intensityMax', 'intensityQuant5', 'intensityQuant95', 'intensityMedian']})
 
-        print(f"Recording Handler (Praat): Raw script output:\n---\n{output}\n---") # Log raw output for debugging
 
-        for line in output.splitlines(): # Split by newline
-            line = line.strip()
-            if '=' in line:
-                parts = line.split('=', 1) # Split only on the first '='
-                if len(parts) == 2:
-                    key = parts[0].strip()
-                    value_str = parts[1].strip()
+        # --- Pitch ---
+        pitch = None
+        mean_pitch = 0 # Initialize defaults needed later
+        voiced_dur = 0
+        unvoiced_dur = 0
+        total_pitch_dur = 0
+        try:
+            print("--> Attempting snd.to_pitch...") # DEBUG
+            pitch = snd.to_pitch(time_step=None, pitch_floor=75.0, pitch_ceiling=600.0)
+            print(f"--> Pitch object created: {pitch}") # DEBUG
+
+            # Get basic stats directly
+            raw_mean_pitch = call(pitch, "Get mean", 0, 0, "Hertz")
+            print(f"--> Raw result from call(pitch, 'Get mean', ...): {raw_mean_pitch} (Type: {type(raw_mean_pitch)})") # DEBUG
+            mean_pitch = 0
+            if raw_mean_pitch is not None and np.isfinite(raw_mean_pitch): mean_pitch = raw_mean_pitch
+
+            # Update features dictionary *immediately* after calculation
+            features['mean_pitch'] = mean_pitch
+            # Get other basic stats and update features dict immediately if valid
+            min_p = call(pitch, "Get minimum", 0, 0, "Hertz", "Parabolic"); features['min_pitch'] = min_p if min_p is not None and np.isfinite(min_p) else 0
+            max_p = call(pitch, "Get maximum", 0, 0, "Hertz", "Parabolic"); features['max_pitch'] = max_p if max_p is not None and np.isfinite(max_p) else 0
+            sd_p = call(pitch, "Get standard deviation", 0, 0, "Hertz"); features['pitch_sd'] = sd_p if sd_p is not None and np.isfinite(sd_p) else 0
+            med_p = call(pitch, "Get quantile", 0, 0, 0.5, "Hertz"); features['pitchMedian'] = med_p if med_p is not None and np.isfinite(med_p) else 0
+            q5_p = call(pitch, "Get quantile", 0, 0, 0.05, "Hertz"); features['pitchQuant5'] = q5_p if q5_p is not None and np.isfinite(q5_p) else 0
+            q95_p = call(pitch, "Get quantile", 0, 0, 0.95, "Hertz"); features['pitchQuant95'] = q95_p if q95_p is not None and np.isfinite(q95_p) else 0
+
+            if mean_pitch > 0:
+                 features['meanPeriod'] = 1.0 / mean_pitch
+
+                 num_frames = pitch.get_number_of_frames()
+                 time_step_pitch = pitch.time_step
+                 total_pitch_dur = 0
+                 voiced_frames = 0
+                 unvoiced_frames = 0
+                 voiced_dur = 0
+                 unvoiced_dur = 0
+
+                 if num_frames > 0 and time_step_pitch > 0:
+                     total_pitch_dur = num_frames * time_step_pitch
+                     pitch_values = pitch.selected_array['frequency']
+                     print(f"--> Pitch frequency values (first 20): {pitch_values[:20]}") # DEBUG
+                     voiced_mask = (pitch_values > 0) & (~np.isnan(pitch_values))
+                     voiced_frames = np.sum(voiced_mask)
+                     unvoiced_frames = num_frames - voiced_frames
+                     print(f"--> Voiced frames: {voiced_frames}, Unvoiced frames: {unvoiced_frames}") # DEBUG
+
+                     voiced_dur = voiced_frames * time_step_pitch
+                     unvoiced_dur = unvoiced_frames * time_step_pitch
+
+                     features['percentUnvoiced'] = (unvoiced_dur / total_pitch_dur * 100) if total_pitch_dur > 0 else 100
+                     features['pitchUvsVRatio'] = (unvoiced_dur / voiced_dur) if voiced_dur > 0 else -1
+                 else:
+                     print("--> Pitch object has 0 frames or 0 time step.") # DEBUG
+                     features['percentUnvoiced'] = 100
+                     features['pitchUvsVRatio'] = -1
+                     voiced_dur = 0
+
+                 # --- PointProcess, Jitter, Shimmer, Breaks (only if voiced frames exist) ---
+                 if voiced_dur > 0:
+                     print("--> Attempting PointProcess/Jitter/Shimmer/Breaks...") # DEBUG
+                     try:
+                         point_process = call([snd, pitch], "To PointProcess (periodic, cc)", 75.0, 600.0)
+                         jit_loc = call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
+                         jit_rap = call(point_process, "Get jitter (rap)", 0, 0, 0.0001, 0.02, 1.3)
+                         shim_db = call(point_process, "Get shimmer (local, dB)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
+                         n_breaks = call(pitch, "Count number of voice breaks", 0.02, 0.1, 0.02) # Use call for breaks
+
+                         if jit_loc is not None and np.isfinite(jit_loc): features['jitterLocal'] = jit_loc
+                         if jit_rap is not None and np.isfinite(jit_rap): features['jitterRap'] = jit_rap
+                         if shim_db is not None and np.isfinite(shim_db): features['shimmerLocalDB'] = shim_db
+                         if n_breaks is not None and np.isfinite(n_breaks): features['numVoiceBreaks'] = n_breaks
+                         features['percentBreaks'] = (features['numVoiceBreaks'] / duration) if duration > 0 else 0
+                         print("--> Jitter/Shimmer/Breaks successful.") # DEBUG
+                     except parselmouth.PraatError as e_pp_breaks:
+                          print(f"Recording Handler (Parselmouth) Info: Could not get PointProcess/jitter/shimmer/break stats: {e_pp_breaks}. Using defaults.")
+                 else:
+                     print("--> No voiced frames found. Skipping Jitter, Shimmer, Breaks.")
+
+                 # --- Slope Features (only if voiced frames exist) ---
+                 if voiced_dur > 0 and num_frames > 1 and time_step_pitch > 0:
+                     print("--> Attempting Slope calculation...") # DEBUG
+                     # ... (slope calculation logic as before) ...
+                     # Make sure to update features dict here: features['numRising'] = numRising etc.
+                     numRising = 0; numFall = 0
+                     maxRisingSlope = 0.0; maxFallingSlope = 0.0
+                     totalRisingSlope = 0.0; totalFallingSlope = 0.0
+                     numRisingSlope = 0; numFallingSlope = 0
+                     last_pitch_val = pitch_values[0] if pitch_values[0] > 0 else np.nan
+                     for i in range(1, num_frames):
+                         current_pitch_val = pitch_values[i] if pitch_values[i] > 0 else np.nan
+                         if not np.isnan(last_pitch_val) and not np.isnan(current_pitch_val):
+                            slope = (current_pitch_val - last_pitch_val) / time_step_pitch
+                            if slope > 0:
+                                prevSlope = 0; # ... (prevSlope logic) ...
+                                if prevSlope <= 0: numRising += 1
+                                totalRisingSlope += slope
+                                numRisingSlope += 1
+                                if slope > maxRisingSlope: maxRisingSlope = slope
+                            elif slope < 0:
+                                prevSlope = 0; # ... (prevSlope logic) ...
+                                if prevSlope >= 0: numFall += 1
+                                totalFallingSlope += slope
+                                numFallingSlope += 1
+                                if slope < maxFallingSlope: maxFallingSlope = slope
+                         last_pitch_val = current_pitch_val
+                     # --- UPDATE features dictionary ---
+                     features['numRising'] = numRising
+                     features['numFall'] = numFall
+                     features['maxRisingSlope'] = maxRisingSlope
+                     features['maxFallingSlope'] = maxFallingSlope
+                     features['avgRisingSlope'] = (totalRisingSlope / numRisingSlope) if numRisingSlope > 0 else 0
+                     features['avgFallingSlope'] = (totalFallingSlope / numFallingSlope) if numFallingSlope > 0 else 0
+                     print("--> Slope calculation successful.") # DEBUG
+                 else:
+                     print("--> No voiced frames/insufficient frames found. Skipping Slope analysis.")
+
+            elif mean_pitch == 0:
+                 print("--> Mean pitch is 0. Detailed voicing/jitter/shimmer/slope analysis skipped.")
+
+
+        except parselmouth.PraatError as e:
+            print(f"Recording Handler (Parselmouth) Warning: Initial Pitch analysis failed: {e}")
+            # This except block should now only catch failures in to_pitch or the basic Get commands
+            # Defaults were already set at the beginning.
+
+
+        # --- Formant Features ---
+        formant = None
+        avgVal1=0; avgVal2=0; avgVal3=0; f1STD=0; f2STD=0; f3STD=0; avgBand1=0; avgBand2=0; avgBand3=0
+        try:
+            formant = snd.to_formant_burg(time_step=0.01, max_number_of_formants=5.0, maximum_formant=5500.0, window_length=0.025, pre_emphasis_from=50.0)
+            num_formant_frames = formant.get_number_of_frames()
+            valid_frames = 0
+            f1_sum=0; f2_sum=0; f3_sum=0; b1_sum=0; b2_sum=0; b3_sum=0
+            f1_sq_sum=0; f2_sq_sum=0; f3_sq_sum=0
+
+            # Get pitch values again if pitch object exists, for checking voicing
+            pitch_values_for_formant = None
+            if pitch:
+                 # Ensure times align - may need interpolation if time steps differ
+                 # For simplicity here, we'll just check the nearest pitch frame time
+                 pitch_times = pitch.xs()
+                 pitch_values_for_formant = pitch.selected_array['frequency']
+
+            for i in range(num_formant_frames):
+                formant_time = formant.get_time_from_frame_number(i + 1) # Frame numbers are 1-based
+                is_voiced = True # Assume voiced if no pitch info
+
+                if pitch_values_for_formant is not None:
+                    # Find nearest pitch frame index
                     try:
-                        features[key] = float(value_str)
-                    except ValueError:
-                        print(f"Recording Handler (Praat) Warning: Could not convert value '{value_str}' to float for key '{key}'. Skipping.")
-                else:
-                     print(f"Recording Handler (Praat) Warning: Skipping malformed output line (expected 'key=value'): '{line}'")
-            # else: # Optional: log lines that don't contain '=' if needed for debug
-            #      print(f"Recording Handler (Praat) Debug: Skipping output line without '=': '{line}'")
+                        pitch_frame_index = (np.abs(pitch_times - formant_time)).argmin()
+                        pitch_val_check = pitch_values_for_formant[pitch_frame_index]
+                        if pitch_val_check == 0 or np.isnan(pitch_val_check): # Check for Praat's 0 or numpy's NaN
+                            is_voiced = False
+                    except IndexError:
+                        is_voiced = False # Error finding frame
+
+                if is_voiced:
+                    f1 = formant.get_value_at_time(formant_number=1, time=formant_time)
+                    f2 = formant.get_value_at_time(formant_number=2, time=formant_time)
+                    f3 = formant.get_value_at_time(formant_number=3, time=formant_time)
+                    b1 = formant.get_bandwidth_at_time(formant_number=1, time=formant_time)
+                    b2 = formant.get_bandwidth_at_time(formant_number=2, time=formant_time)
+                    b3 = formant.get_bandwidth_at_time(formant_number=3, time=formant_time)
+
+                    # Check if all formant values are valid numbers
+                    formant_vals = [f1, f2, f3, b1, b2, b3]
+                    if all(v is not None and np.isfinite(v) for v in formant_vals):
+                        valid_frames += 1
+                        f1_sum += f1; f2_sum += f2; f3_sum += f3
+                        b1_sum += b1; b2_sum += b2; b3_sum += b3
+                        f1_sq_sum += f1*f1; f2_sq_sum += f2*f2; f3_sq_sum += f3*f3
+
+            if valid_frames > 0:
+                avgVal1 = f1_sum / valid_frames; avgVal2 = f2_sum / valid_frames; avgVal3 = f3_sum / valid_frames
+                avgBand1 = b1_sum / valid_frames; avgBand2 = b2_sum / valid_frames; avgBand3 = b3_sum / valid_frames
+            if valid_frames > 1:
+                f1Var = (f1_sq_sum / valid_frames) - (avgVal1**2); f1Var = max(0, f1Var)
+                f2Var = (f2_sq_sum / valid_frames) - (avgVal2**2); f2Var = max(0, f2Var)
+                f3Var = (f3_sq_sum / valid_frames) - (avgVal3**2); f3Var = max(0, f3Var)
+                f1STD = np.sqrt(f1Var * valid_frames / (valid_frames - 1))
+                f2STD = np.sqrt(f2Var * valid_frames / (valid_frames - 1))
+                f3STD = np.sqrt(f3Var * valid_frames / (valid_frames - 1))
+
+            features['formant1Mean'] = avgVal1
+            features['formant2Mean'] = avgVal2
+            features['formant3Mean'] = avgVal3
+            features['formant1SD'] = f1STD
+            features['formant2SD'] = f2STD
+            features['formant3SD'] = f3STD
+            features['formant1Bandwidth'] = avgBand1
+            features['formant2Bandwidth'] = avgBand2
+            features['formant3Bandwidth'] = avgBand3
+
+        except parselmouth.PraatError as e:
+            print(f"Recording Handler (Parselmouth) Warning: Formant analysis failed: {e}")
+            # Assign default 0s to formant features
+            formant_keys = ['formant1Mean', 'formant2Mean', 'formant3Mean', 'formant1SD', 'formant2SD',
+                            'formant3SD', 'formant1Bandwidth', 'formant2Bandwidth', 'formant3Bandwidth']
+            features.update({k: 0 for k in formant_keys})
 
 
-        if not features:
-             print("Recording Handler (Praat) Warning: No features extracted. Check script output format (needs 'key=value' lines).")
-
-        print(f"Recording Handler (Praat): Successfully extracted {len(features)} features.")
+        print(f"Recording Handler (Parselmouth): Successfully extracted {len(features)} features.")
         return features
 
+    except parselmouth.PraatError as e:
+        # Catch errors during initial sound loading or major failures
+        print(f"Recording Handler (Parselmouth) Error: Failed to process audio file '{audio_path}': {e}")
+        return None
     except FileNotFoundError:
-        # Specific error if praat executable itself is not found
-        print(f"Recording Handler (Praat) Error: Praat executable '{praat_executable_path}' not found or not executable. Make sure Praat is installed and in your system's PATH or provide the full path.")
-        raise # Re-raise to signal critical failure
+         print(f"Recording Handler (Parselmouth) Error: Audio file not found at '{audio_path}'.")
+         return None
     except Exception as e:
-        print(f"Recording Handler (Praat) Error during feature extraction: {e}")
-        raise RuntimeError(f"Feature extraction failed: {e}") from e
-
+        # Catch any other unexpected Python errors
+        print(f"Recording Handler (Parselmouth) Error: Unexpected error during feature extraction for '{audio_path}': {e}")
+        import traceback
+        traceback.print_exc() # Print full traceback for debugging
+        return None
 
 
 
@@ -340,7 +545,7 @@ def _recognize_speech_thread(topic_idx, follow_up_idx):
                         if PRAAT_FEATURE_EXTRACTION_ENABLED and audio_filepath:
                              try:
                                  # Make sure the file handle is closed before Praat tries to access it
-                                 extracted_audio_features = extract_features(audio_filepath, PRAAT_EXECUTABLE, PRAAT_SCRIPT_PATH)
+                                 extracted_audio_features = extract_features(audio_filepath)
                                  if extracted_audio_features:
                                      print(f"Recording Handler (Praat): Extracted Features for {audio_filename}:")
                                      # You can format this output better if needed
