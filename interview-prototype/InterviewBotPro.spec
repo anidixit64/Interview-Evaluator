@@ -11,7 +11,7 @@ icon_file_icns = 'icons/app_icon.icns' # Path to your macOS .icns file
 entitlements_file_path = 'entitlements.plist' # Path to your macOS entitlements file
 
 # --- Hidden Imports ---
-# Removed 'pydub'. Added 'soundfile' and 'cffi'.
+# Added specific sklearn submodules needed for unpickling the model pipeline.
 hiddenimports = [
     'pkg_resources',
     'keyring.backends.macOS',
@@ -19,9 +19,8 @@ hiddenimports = [
     'google.api_core.bidi',
     'pyaudio',
     'sounddevice',
-    # 'pydub',  # REMOVED - Replaced by soundfile for OpenAI TTS decoding
-    'soundfile', # ADDED - Used by tts_openai for decoding
-    'cffi',      # ADDED - Dependency for soundfile
+    'soundfile',
+    'cffi',
     'openai',
     'google.generativeai',
     'PyQt6.sip',
@@ -34,38 +33,64 @@ hiddenimports = [
     'speech_recognition',
     'PyPDF2',
     'cv2',
-    'numpy',     # Kept - Used by soundfile and tts_openai directly now
-    'nltk',      # Kept - Used by tts_openai for sentence splitting
+    'numpy',
+    'nltk',
+    'pandas',
+    'scipy',
+    'sklearn',              # Keep top-level just in case
+    # --- Added for loading the scikit-learn pipeline ---
+    'sklearn.pipeline',
+    'sklearn.ensemble',
+    'sklearn.preprocessing',
+    'sklearn.impute',
+    'sklearn.metrics',      # Often needed indirectly or for checks
+    'sklearn.model_selection', # Often needed indirectly
+    'sklearn.utils._typedefs', # Sometimes needed internally by sklearn
+    'sklearn.utils._openmp_helpers', # Sometimes needed
+    'sklearn.neighbors._typedefs', # Add related typedefs
+    'sklearn.neighbors._quad_tree', # Add potential compiled extensions
+    'sklearn.tree', # Base for RandomForest
+    'sklearn.tree._utils', # Utilities for tree
+    # --- End added sklearn ---
+    'joblib',
+    'parselmouth',
+    '_portaudio',
 ]
 
 # --- Data Files ---
 # Collect necessary data files
-# Added collection for nltk_data needed by tts_openai
 datas = [
     ('icons', 'icons'),
     ('ui/styles.qss', 'ui'),
+    # Include model files
+    ('core/model_output/prosody_model_features.joblib', 'core/model_output'),
+    ('core/model_output/prosody_model_pipeline.joblib', 'core/model_output'),
 ]
-# Use hook utility to collect nltk_data (ensure nltk is installed in the env)
-# This finds the 'nltk_data' directory within the nltk package installation
-# and copies it into the bundle at the top level ('nltk_data').
-# tts_openai.py's NLTK logic should find it there when bundled.
+
+# Collect nltk_data
 try:
     datas += collect_data_files('nltk_data', include_py_files=True)
     print("INFO: Successfully added nltk_data using collect_data_files.")
 except Exception as e:
     print(f"WARNING: Failed to automatically collect nltk_data: {e}")
     print("         Ensure nltk is installed and consider manually adding nltk_data if bundling fails.")
-    # Manual fallback example (adjust 'path/to/your/env/lib/.../nltk_data'):
-    # datas += [('path/to/your/env/lib/pythonX.Y/site-packages/nltk_data', 'nltk_data')]
+
+# Collect parselmouth data files
+try:
+    datas += collect_data_files('parselmouth', include_py_files=False)
+    print("INFO: Successfully added parselmouth data files using collect_data_files.")
+except Exception as e:
+    print(f"WARNING: Failed to automatically collect parselmouth data files: {e}")
+    print("         Ensure parselmouth is installed. The app might fail to run Praat.")
 
 
-# --- Analysis Block (Add hiddenimports, updated datas) ---
+# --- Analysis Block (No change needed here) ---
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[], # Ensure ffmpeg/ffprobe are NOT added here or via command line
-    datas=datas, # Use the updated datas list
-    hiddenimports=hiddenimports, # Use the updated hiddenimports list
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -75,57 +100,55 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-# --- EXE Object (Keep as generated, likely needed internally) ---
+# --- EXE Object (No change needed here) ---
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name='InterviewBotPro', # Internal name for the executable inside the .app
+    name='InterviewBotPro',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False, # Turn off UPX, it often causes problems
-    console=False, # Keep as GUI app
+    upx=False,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
-    entitlements_file=None, # Entitlements go on the BUNDLE/APP, not the inner EXE
+    entitlements_file=None,
 )
 
-# --- COLLECT Object (Modify to turn off UPX) ---
+# --- COLLECT Object (No change needed here) ---
 coll = COLLECT(
     exe,
     a.binaries,
-    a.datas, # Use a.datas here (contains collected nltk_data now)
+    a.datas,
     strip=False,
-    upx=False, # Turn off UPX here too
+    upx=False,
     upx_exclude=[],
-    name='InterviewBotPro', # Name of the folder within Contents/MacOS usually
+    name='InterviewBotPro',
 )
 
-# --- BUNDLE Object (Modify to add icon, identifier, plist, entitlements) ---
+# --- BUNDLE Object (No change needed here) ---
 app_icon = icon_file_icns if os.path.exists(icon_file_icns) else None
-# !!! IMPORTANT: Replace 'com.yourcompany' with your actual reverse domain !!!
-bundle_identifier = f'com.yourcompany.{app_name.lower().replace(" ", "")}'
+bundle_identifier = f'com.yourcompany.{app_name.lower().replace(" ", "")}' # Replace com.yourcompany
 entitlements = entitlements_file_path if os.path.exists(entitlements_file_path) else None
 
 app = BUNDLE(
-    coll, # Bundle the collected files/exe
-    name=f'{app_name}.app', # Correct name for the .app bundle
-    icon=app_icon, # Set the icon path
-    bundle_identifier=bundle_identifier, # Set the bundle ID
-    info_plist={ # Add the info_plist dictionary
+    coll,
+    name=f'{app_name}.app',
+    icon=app_icon,
+    bundle_identifier=bundle_identifier,
+    info_plist={
         'NSMicrophoneUsageDescription': 'This app needs access to the microphone for speech-to-text input during the interview.',
         'NSCameraUsageDescription': 'This app needs access to the camera to record video during the interview.',
         'CFBundleName': app_name,
         'CFBundleDisplayName': app_name,
-        'CFBundleIdentifier': bundle_identifier, # Use variable
+        'CFBundleIdentifier': bundle_identifier,
         'CFBundleVersion': '1.0.0', # CHANGE as needed
         'CFBundleShortVersionString': '1.0', # CHANGE as needed
-        # !!! IMPORTANT: Replace 'Your Name/Company' !!!
-        'NSHumanReadableCopyright': 'Copyright © 2025 Ethan Justice. All rights reserved.'
+        'NSHumanReadableCopyright': 'Copyright © 2025 Ethan Justice. All rights reserved.' # Replace
     },
-    entitlements_file=entitlements, # Set the entitlements file path
+    entitlements_file=entitlements,
 )

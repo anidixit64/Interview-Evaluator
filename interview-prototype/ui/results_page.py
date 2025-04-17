@@ -1,4 +1,5 @@
-# ui/results_page.py -> Renamed conceptually to ResultsContainerPage
+# FILE: ui/results_page.py -> ResultsContainerPage
+# MODIFIED: Accepts avg_speech_score in display_results and passes it down.
 """
 Defines the container page for displaying interview results,
 managing navigation between scores and analysis sub-pages.
@@ -42,6 +43,7 @@ class ResultsContainerPage(QWidget): # Renamed class
 
     def _init_ui(self):
         """Initializes the container UI."""
+        # (UI Initialization remains the same)
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(15, 15, 15, 15)
         page_layout.setSpacing(15) # Spacing between stack, nav, actions
@@ -122,37 +124,46 @@ class ResultsContainerPage(QWidget): # Renamed class
 
     def go_to_next_page(self):
         """Switches the stacked widget to the next page."""
+        # (Code remains the same)
         current_index = self.stacked_widget.currentIndex()
         if current_index < self.stacked_widget.count() - 1:
             self.stacked_widget.setCurrentIndex(current_index + 1)
 
     def go_to_previous_page(self):
         """Switches the stacked widget to the previous page."""
+        # (Code remains the same)
         current_index = self.stacked_widget.currentIndex()
         if current_index > 0:
             self.stacked_widget.setCurrentIndex(current_index - 1)
 
     def _update_navigation_buttons(self):
         """Shows/hides navigation buttons based on the current page index."""
+        # (Code remains the same)
         current_index = self.stacked_widget.currentIndex()
         count = self.stacked_widget.count()
 
         self.back_button.setVisible(current_index > 0)
         self.next_button.setVisible(current_index < count - 1)
 
-    def display_results(self, summary: str | None, assessment_data: dict | None, content_score_data: dict | None):
+    # MODIFIED: Accepts avg_speech_score
+    def display_results(self, summary: str | None,
+                        assessment_data: dict | None,
+                        content_score_data: dict | None,
+                        avg_speech_score: int): # Added parameter
         """Delegates result data to the appropriate sub-pages."""
         print("ResultsContainerPage: Delegating results display...")
         if self.results_page_part1:
-            self.results_page_part1.display_results(content_score_data)
+            # Pass both content score data and the average speech score
+            self.results_page_part1.display_results(content_score_data, avg_speech_score)
         if self.results_page_part2:
-            self.results_page_part2.display_results(assessment_data)
+            self.results_page_part2.display_results(assessment_data) # Part 2 doesn't need speech score
         # Reset to the first page when new results are loaded
         self.stacked_widget.setCurrentIndex(self.SCORES_PAGE_INDEX)
         self._update_navigation_buttons() # Update nav buttons for the first page
 
     def clear_fields(self):
         """Delegates clearing fields to sub-pages."""
+        # (Code remains the same)
         print("ResultsContainerPage: Clearing fields...")
         if self.results_page_part1:
             self.results_page_part1.clear_fields()
