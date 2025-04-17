@@ -67,7 +67,7 @@ except Exception as e:
     print(f"Recording Handler (Praat) Warning: Error determining Praat script path: {e}. Feature extraction will be skipped.")
 
 # 5. Final flag for enabling/disabling feature extraction
-PRAAT_FEATURE_EXTRACTION_ENABLED = PRAAT_SCRIPT_PATH is not None
+PRAAT_FEATURE_EXTRACTION_ENABLED = True
 print(f"[DEBUG] Feature extraction enabled: {PRAAT_FEATURE_EXTRACTION_ENABLED}")
 # --- END MODIFICATION ---
 
@@ -250,25 +250,30 @@ def extract_features(audio_path):
 
                  # --- PointProcess, Jitter, Shimmer, Breaks (only if voiced frames exist) ---
                  if voiced_dur > 0:
-                     print("--> Attempting PointProcess/Jitter/Shimmer/Breaks...") # DEBUG
+
+                     print("--> Attempting PointProcess/Jitter/Shimmer/Breaks via call()...") # DEBUG
+                     point_process = None # Initialize
                      try:
-                         point_process = call([snd, pitch], "To PointProcess (periodic, cc)", 75.0, 600.0)
+                         print(f"--> Calling 'To PointProcess (periodic, cc)' with only snd: {snd}") # DEBUG
+                         point_process = call(snd, "To PointProcess (periodic, cc)", 75.0, 600.0)
+                         print(f"--> PointProcess object result: {point_process}")
+
                          jit_loc = call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
                          jit_rap = call(point_process, "Get jitter (rap)", 0, 0, 0.0001, 0.02, 1.3)
-                         shim_db = call(point_process, "Get shimmer (local, dB)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
-                         n_breaks = call(pitch, "Count number of voice breaks", 0.02, 0.1, 0.02) # Use call for breaks
+                         shim = call([snd, point_process], "Get shimmer (local_dB)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
 
-                         if jit_loc is not None and np.isfinite(jit_loc): features['jitterLocal'] = jit_loc
+                         if jit_loc is not None and np.isfinite(jit_loc): features['jitter'] = jit_loc
                          if jit_rap is not None and np.isfinite(jit_rap): features['jitterRap'] = jit_rap
-                         if shim_db is not None and np.isfinite(shim_db): features['shimmerLocalDB'] = shim_db
-                         if n_breaks is not None and np.isfinite(n_breaks): features['numVoiceBreaks'] = n_breaks
-                         features['percentBreaks'] = (features['numVoiceBreaks'] / duration) if duration > 0 else 0
-                         print("--> Jitter/Shimmer/Breaks successful.") # DEBUG
+                         if shim_db is not None and np.isfinite(shim_db): features['shimmer'] = shim_db
+
                      except parselmouth.PraatError as e_pp_breaks:
                           print(f"Recording Handler (Parselmouth) Info: Could not get PointProcess/jitter/shimmer/break stats: {e_pp_breaks}. Using defaults.")
-                 else:
+                          # Reset relevant features
+                          features['jitterLocal'] = 0; features['jitterRap'] = 0; features['shimmerLocalDB'] = 0
+                          features['numVoiceBreaks'] = 0; features['percentBreaks'] = 0
+                 else: # No voiced frames found
                      print("--> No voiced frames found. Skipping Jitter, Shimmer, Breaks.")
-
+                     # Defaults are already set
                  # --- Slope Features (only if voiced frames exist) ---
                  if voiced_dur > 0 and num_frames > 1 and time_step_pitch > 0:
                      print("--> Attempting Slope calculation...") # DEBUG
