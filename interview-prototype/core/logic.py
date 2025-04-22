@@ -7,9 +7,7 @@ import keyring
 import google.generativeai as genai
 from PyPDF2 import PdfReader
 import sys
-
-# --- Import Prompts ---
-from . import prompts # Relative import for prompts.py in the same directory
+from . import prompts
 
 # --- Default Configuration & Constants ---
 DEFAULT_NUM_TOPICS = 1
@@ -93,13 +91,11 @@ def generate_initial_questions(resume_text, job_desc_text="", model_name=MODEL_N
     try:
         model = genai.GenerativeModel(model_name)
 
-        # Prepare job description section for the prompt
         if job_desc_text:
             job_desc_section = prompts.JOB_DESC_SECTION_TEMPLATE.format(job_desc_text=job_desc_text)
         else:
             job_desc_section = prompts.NO_JOB_DESC_SECTION
 
-        # Format the main prompt template
         prompt = prompts.INITIAL_QUESTIONS_PROMPT_TEMPLATE.format(
             num_questions=num_questions,
             resume_text=resume_text,
@@ -163,9 +159,8 @@ def generate_follow_up_question(context_question, user_answer, conversation_hist
     print(f"Generating follow-up question using {model_name}...")
     try:
         model = genai.GenerativeModel(model_name)
-        history_str = "\n".join([f"Q: {item['q'][:100]}...\nA: {item['a'][:150]}..." for item in conversation_history[-3:]]) # Limit history context
+        history_str = "\n".join([f"Q: {item['q'][:100]}...\nA: {item['a'][:150]}..." for item in conversation_history[-3:]])
 
-        # Format the prompt template
         prompt = prompts.FOLLOW_UP_PROMPT_TEMPLATE.format(
             context_question=context_question,
             history_str=history_str,
@@ -194,12 +189,11 @@ def generate_follow_up_question(context_question, user_answer, conversation_hist
             print("Warning: Received empty follow-up response, ending topic.")
             return "[END TOPIC]"
 
-        # Return exact signal or generated question
         return follow_up
 
     except Exception as e:
         print(f"{ERROR_PREFIX}Generating follow-up question: {e}")
-        return None # Indicate error
+        return None
 
 def generate_summary_review(full_history, model_name=MODEL_NAME):
     """
@@ -213,7 +207,6 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
     try:
         model = genai.GenerativeModel(model_name)
 
-        # Prepare transcript (limited length)
         transcript_parts = []
         total_len = 0
         max_len = 15000
@@ -230,7 +223,6 @@ def generate_summary_review(full_history, model_name=MODEL_NAME):
                 break
         transcript = "".join(transcript_parts)
 
-        # Format the prompt template
         prompt = prompts.SUMMARY_REVIEW_PROMPT_TEMPLATE.format(transcript=transcript)
 
         safety_settings = [
@@ -272,10 +264,9 @@ def generate_content_score_analysis(full_history, model_name=MODEL_NAME):
     try:
         model = genai.GenerativeModel(model_name)
 
-        # Prepare transcript snippet (similar to summary review)
         transcript_parts = []
         total_len = 0
-        max_len = 15000 # Use a reasonable length limit
+        max_len = 15000 
         for item in reversed(full_history):
             q_part = f"Interviewer Q: {item['q']}\n"
             a_part = f"Candidate A: {item['a']}\n\n"
@@ -289,11 +280,9 @@ def generate_content_score_analysis(full_history, model_name=MODEL_NAME):
                 break
         transcript = "".join(transcript_parts)
 
-        # Format the new prompt
         prompt = prompts.CONTENT_SCORE_PROMPT_TEMPLATE.format(transcript=transcript)
 
         safety_settings = [
-            # ... (standard safety settings) ...
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
             {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -310,12 +299,10 @@ def generate_content_score_analysis(full_history, model_name=MODEL_NAME):
             result['error'] = f"Could not generate content score. Reason: {block_reason}"
             return result
 
-        # --- Parse Score and Reasoning ---
         generated_text = response.text.strip()
-        score = 0 # Default score
+        score = 0 
         analysis_text = "Could not parse analysis from response."
 
-        # Use regex to find score reliably
         score_match = re.search(r"Score:\s*(\d+)", generated_text, re.IGNORECASE)
         if score_match:
             try:
@@ -325,11 +312,10 @@ def generate_content_score_analysis(full_history, model_name=MODEL_NAME):
                 print("Warning: Could not parse score number, using 0.")
                 score = 0
 
-        # Find reasoning part (everything after "Reasoning:")
         reasoning_match = re.search(r"Reasoning:?\s*(.*)", generated_text, re.IGNORECASE | re.DOTALL)
         if reasoning_match:
             analysis_text = reasoning_match.group(1).strip()
-        elif not score_match: # If neither score nor reasoning header found, use full text
+        elif not score_match:
              analysis_text = generated_text if generated_text else analysis_text
 
 
@@ -346,7 +332,6 @@ def generate_content_score_analysis(full_history, model_name=MODEL_NAME):
     
 
     
-# --- MODIFIED Function ---
 def generate_qualification_assessment(resume_text, job_desc_text, full_history, model_name=MODEL_NAME):
     """
     Generates an assessment of candidate qualifications against the job description.
@@ -412,7 +397,6 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
         requirements_list = []
         overall_fit = "Overall fit assessment not found in response."
 
-        # --- REVERTED Regex (captures Evidence again) ---
         req_pattern = re.compile(
             r"^[ \t]*[\*-][ \t]+\*\*Requirement[:]*\*\*[ \t]*(.*?)\n"
             r"\s*[\*-][ \t]+\*\*Assessment[:]*\*\*[ \t]*(.*?)\n"
@@ -420,7 +404,6 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
             r"(?=\n[ \t]*[\*-][ \t]+\*\*Requirement|\n\s*\*\*2\. Overall Fit|\Z)",
             re.DOTALL | re.IGNORECASE | re.MULTILINE
         )
-        # --- End REVERTED Regex ---
 
         matches = list(req_pattern.finditer(full_assessment_text))
         print(f"Found {len(matches)} potential requirement matches using regex (with evidence).")
@@ -430,31 +413,26 @@ def generate_qualification_assessment(resume_text, job_desc_text, full_history, 
             assessment_level = match.group(2).strip() if match.group(2) else "N/A"
             evidence_text = match.group(3).strip() if match.group(3) else "N/A" # Get evidence group
 
-            # --- Parse Evidence (Restored Logic) ---
             resume_evidence = "N/A"
             transcript_evidence = "N/A"
-            # Use non-capturing groups (?:...) in lookahead/lookbehind if needed, but simple search is usually fine
             r_match = re.search(r'\(R\)\s*(.*?)(?=\(T\)|$)', evidence_text, re.IGNORECASE | re.DOTALL)
             t_match = re.search(r'\(T\)\s*(.*?)(?=\(R\)|$)', evidence_text, re.IGNORECASE | re.DOTALL)
 
             if r_match: resume_evidence = r_match.group(1).strip()
             if t_match: transcript_evidence = t_match.group(1).strip()
 
-            # If markers not found but evidence exists, assign it primarily to Resume evidence for simplicity
             if resume_evidence == "N/A" and transcript_evidence == "N/A" and evidence_text != "N/A":
                 print(f"Warning: Could not parse specific (R)/(T) evidence for: '{req_text}'. Using full text.")
-                resume_evidence = evidence_text # Assign full text here
-                transcript_evidence = "N/A"     # Keep transcript N/A
-            # --- End Parse Evidence ---
+                resume_evidence = evidence_text
+                transcript_evidence = "N/A"
 
             requirements_list.append({
                 "requirement": req_text,
                 "assessment": assessment_level,
-                "resume_evidence": resume_evidence,      # Store parsed evidence
-                "transcript_evidence": transcript_evidence # Store parsed evidence
+                "resume_evidence": resume_evidence, 
+                "transcript_evidence": transcript_evidence 
             })
 
-        # Extract Overall Fit section
         overall_match = re.search(r'\*\*2\.?\s*Overall Fit Assessment.*?\*\*:?\s*(.*?)$', full_assessment_text, re.DOTALL | re.IGNORECASE)
         if overall_match:
             overall_fit = overall_match.group(1).strip()

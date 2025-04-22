@@ -24,7 +24,6 @@ class JDWidget(QFrame):
         """
         super().__init__(parent)
         self.jd_data = jd_data
-        # parent_widget is SetupPage, parent_widget.parent_window is MainWindow
         self.parent_window = parent_widget.parent_window
         self._is_selected = False
 
@@ -33,28 +32,24 @@ class JDWidget(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFrameShadow(QFrame.Shadow.Raised)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        # Increase minimum height significantly for larger font
-        self.setMinimumHeight(55) # Increased height
+        self.setMinimumHeight(55) 
 
-        # --- Layout & Content ---
         layout = QHBoxLayout(self)
-         # Increased padding for larger text
         layout.setContentsMargins(18, 10, 18, 10)
-        layout.setSpacing(15) # Increased spacing
+        layout.setSpacing(15)
 
         name = self.jd_data.get("name", "Unnamed Job Description")
         text_preview = self.jd_data.get("text", "")[:80] + "..."
 
         name_label = QLabel(name)
-        # *** Use the XXL font from MainWindow ***
-        font_to_use = self.parent_window.font_default # Fallback
+        font_to_use = self.parent_window.font_default
         if hasattr(self.parent_window, 'font_default_xxl'):
             font_to_use = self.parent_window.font_default_xxl
-        name_label.setFont(font_to_use) # Apply the large font
+        name_label.setFont(font_to_use)
 
         name_label.setToolTip(f"Preview: {text_preview}")
         name_label.setObjectName("jdNameLabel")
-        name_label.setWordWrap(True) # Allow wrapping
+        name_label.setWordWrap(True)
 
         layout.addWidget(name_label, stretch=1)
 
@@ -68,6 +63,5 @@ class JDWidget(QFrame):
         """Visually indicate if this widget is the currently selected JD."""
         self._is_selected = selected
         self.setProperty("selected", selected)
-        # Re-polish to apply QSS changes based on the 'selected' property
         self.style().unpolish(self)
         self.style().polish(self)

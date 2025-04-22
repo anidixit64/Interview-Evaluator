@@ -1,11 +1,9 @@
 /* ui/styles.qss */
 
-/* Global Rounded Corners for specific widget types */
-QLineEdit, QTextEdit, QPushButton, QToolButton { /* Added QToolButton */
+QLineEdit, QTextEdit, QPushButton, QToolButton {
     border-radius: 8px;
 }
 
-/* Style for QGroupBox Frame - No border, use padding for title space */
 QGroupBox {
     background-color: transparent;
     border: none;
@@ -13,7 +11,6 @@ QGroupBox {
     padding: 18px 5px 5px 5px;
 }
 
-/* Style for QGroupBox Title - Position naturally within top padding */
 QGroupBox::title {
     subcontrol-origin: padding;
     subcontrol-position: top left;
@@ -22,57 +19,84 @@ QGroupBox::title {
     color: #DDDDDD;
 }
 
-
-/* --- Button Styling --- */
-/* ... (Keep all QPushButton rules as before) ... */
-QPushButton { background-color: white; color: black; border: 1px solid #BBBBBB; padding: 5px 10px; min-height: 20px; }
-QPushButton:hover { background-color: #F0F0F0; border-color: #999999; }
-QPushButton:pressed { background-color: #E0E0E0; border-color: #777777; }
-QPushButton:disabled { background-color: #DCDCDC; color: #A0A0A0; border-color: #C0C0C0; }
-QPushButton#adjustButton { background-color: white; border: 1px solid #AAAAAA; color: black; min-height: 20px; min-width: 20px; padding: 2px; }
-QPushButton#adjustButton:hover { background-color: #F0F0F0; border-color: #888888; }
-QPushButton#adjustButton:pressed { background-color: #E0E0E0; border-color: #666666; }
-QPushButton#adjustButton:disabled { background-color: #EAEAEA; border-color: #C0C0C0; }
-QPushButton#recordSubmitButton { min-height: 30px; }
-
-/* --- Sidebar Toggle Button --- */
-QToolButton#sidebarToggleButton {
-    background-color: transparent; /* Make background invisible */
-    border: none; /* No border */
+QPushButton {
+    background-color: white;
+    color: black;
+    border: 1px solid #BBBBBB;
+    padding: 5px 10px;
+    min-height: 20px;
+}
+QPushButton:hover {
+    background-color: #F0F0F0;
+    border-color: #999999;
+}
+QPushButton:pressed {
+    background-color: #E0E0E0;
+    border-color: #777777;
+}
+QPushButton:disabled {
+    background-color: #DCDCDC;
+    color: #A0A0A0;
+    border-color: #C0C0C0;
+}
+QPushButton#adjustButton {
+    background-color: white;
+    border: 1px solid #AAAAAA;
+    color: black;
+    min-height: 20px;
+    min-width: 20px;
     padding: 2px;
-    border-radius: 4px; /* Slight rounding */
+}
+QPushButton#adjustButton:hover {
+    background-color: #F0F0F0;
+    border-color: #888888;
+}
+QPushButton#adjustButton:pressed {
+    background-color: #E0E0E0;
+    border-color: #666666;
+}
+QPushButton#adjustButton:disabled {
+    background-color: #EAEAEA;
+    border-color: #C0C0C0;
+}
+QPushButton#recordSubmitButton {
+    min-height: 30px;
+}
+
+QToolButton#sidebarToggleButton {
+    background-color: transparent;
+    border: none;
+    padding: 2px;
+    border-radius: 4px;
 }
 QToolButton#sidebarToggleButton:hover {
-    background-color: #4A4A4A; /* Highlight on hover */
+    background-color: #4A4A4A;
 }
 QToolButton#sidebarToggleButton:pressed, QToolButton#sidebarToggleButton:checked {
-    background-color: #5A5A5A; /* Indicate pressed or active state */
+    background-color: #5A5A5A;
 }
 
-
-/* --- Input/Text Area Styling --- */
 QTextEdit, QLineEdit {
    border: 1px solid #555555;
    padding: 3px;
    background-color: #383838;
    color: #E0E0E0;
 }
-QTextEdit:disabled, QLineEdit:disabled { background-color: #404040; color: #888888; }
-QTextEdit:read-only, QLineEdit:read-only { background-color: #303030; color: #AAAAAA; }
+QTextEdit:disabled, QLineEdit:disabled {
+    background-color: #404040;
+    color: #888888;
+}
+QTextEdit:read-only, QLineEdit:read-only {
+    background-color: #303030;
+    color: #AAAAAA;
+}
 
-
-/* --- Progress Indicator --- */
 QLabel#progressIndicator {
-    color: #AAAAAA; /* Color for non-active steps */
+    color: #AAAAAA;
     font-weight: normal;
     padding: 5px;
 }
 
-/* --- REMOVED RULE for Active Step --- */
-/* QLabel#progressIndicator b { ... } */
-
-
-/* --- Status Bar --- */
 QLabel#statusBar {
     color: #E0E0E0;
     background-color: #1E1E1E;
@@ -81,37 +105,6 @@ QLabel#statusBar {
     min-height: 18px;
 }
 
-
-QTextEdit#scoreDescriptionEdit {
-    background-color: #303030; /* Slightly different background */
-    border: 1px solid #444444;
-    padding: 5px;
-    border-radius: 6px; /* Slightly rounded corners */
-}
-
-/* --- Style for the score description text edit (Optional) --- */
-QTextEdit#scoreDescriptionEdit {
-    background-color: #303030; /* Slightly different background */
-    border: 1px solid #444444;
-    padding: 5px;
-    border-radius: 6px; /* Slightly rounded corners */
-}
-
-/* --- (Keep existing styles for progressIndicator, statusBar etc.) --- */
-QLabel#progressIndicator {
-    color: #AAAAAA; /* Color for non-active steps */
-    font-weight: normal;
-    padding: 5px;
-}
-QLabel#statusBar {
-    color: #E0E0E0;
-    background-color: #1E1E1E;
-    padding: 4px 8px;
-    border-top: 1px solid #555555;
-    min-height: 18px;
-}
-
-/* --- Style for the score description text edit --- */
 QTextEdit#scoreDescriptionEdit {
     background-color: #303030;
     border: 1px solid #444444;
@@ -119,131 +112,89 @@ QTextEdit#scoreDescriptionEdit {
     border-radius: 6px;
 }
 
-/* --- Style for the requirements scroll area --- */
-QScrollArea#requirementsScrollArea {
-    border: 1px solid #444444; /* Border around scroll area */
-    background-color: #2E2E2E; /* Background inside scroll area */
-    border-radius: 6px;
-}
-
-/* --- Style for individual requirement sections --- */
-QFrame#requirementSection {
-    background-color: #383838; /* Background for each requirement */
-    border: 1px solid #484848;
-    border-radius: 4px;
-    padding: 5px; /* Internal padding */
-}
-
-/* --- Style for evidence labels (Optional: make dimmer) --- */
-QLabel#evidenceLabel {
-    color: #BBBBBB; /* Slightly dimmer text for evidence */
-}
-
-
-/* --- Style for the score description text edit --- */
-QTextEdit#scoreDescriptionEdit {
-    background-color: #303030;
-    border: 1px solid #444444;
-    padding: 5px;
-    border-radius: 6px;
-}
-
-/* --- Style for the requirements scroll area --- */
 QScrollArea#requirementsScrollArea {
     border: 1px solid #444444;
     background-color: #2E2E2E;
     border-radius: 6px;
 }
 
-/* --- Style for individual requirement sections (the outer frame) --- */
 QFrame#requirementSection {
-    background-color: #383838; /* Background for each requirement frame */
+    background-color: #383838;
     border: 1px solid #484848;
     border-radius: 4px;
-    /* padding: 0px; No padding on the outer frame itself */
-    margin-bottom: 2px; /* Small gap below each section */
+    padding: 5px;
 }
 
-/* --- Style for the CLICKABLE summary part inside the requirement section --- */
+QLabel#evidenceLabel {
+    color: #BBBBBB;
+}
+
 QWidget#requirementSummary {
-    background-color: transparent; /* Inherit from requirementSection by default */
-    border: none; /* No border on the summary part */
-    padding: 4px; /* Add padding inside the clickable area */
+    background-color: transparent;
+    border: none;
+    padding: 4px;
 }
-/* Optional: Add a hover effect */
 QWidget#requirementSummary:hover {
-    background-color: #4A4A4A; /* Slightly lighter on hover */
+    background-color: #4A4A4A;
 }
 
-/* --- Style for the EXPANDED details part inside the requirement section --- */
 QWidget#requirementDetails {
-    background-color: #303030; /* Slightly different background for details */
+    background-color: #303030;
     border: none;
-    /* Padding is handled by its internal layout margins */
-    /* Add top border for separation? */
     border-top: 1px solid #484848;
 }
 
-/* --- Style for evidence labels inside the details part --- */
 QLabel#evidenceText {
-    color: #CCCCCC; /* Standard text color for evidence */
-    margin-left: 5px; /* Indent evidence text slightly */
+    color: #CCCCCC;
+    margin-left: 5px;
 }
-QLabel.evidenceText { /* Allow styling by class if needed */
+QLabel.evidenceText {
     color: #CCCCCC;
     margin-left: 5px;
 }
 
-/* --- Setup Page Sidebar --- */
 QFrame#setupSidebar {
-    background-color: #2A2A2A; /* Darker background for sidebar */
-    border-right: 1px solid #555555; /* Separator line */
+    background-color: #2A2A2A;
+    border-right: 1px solid #555555;
 }
 
-/* --- Setup Page Scroll Areas (Resume/JD in Main Content) --- */
 QScrollArea#resumeScrollArea, QScrollArea#jdScrollArea {
     border: 1px solid #444444;
     background-color: #2E2E2E;
     border-radius: 6px;
-    /* Keep height constraints set in code */
 }
 
-/* --- Style for individual Resume Widgets in Main Content --- */
 QFrame#resumeEntryWidget {
     background-color: #383838;
     border: 1px solid #484848;
     border-radius: 4px;
-    min-height: 30px; /* Ensure minimum height */
+    min-height: 30px;
 }
 QFrame#resumeEntryWidget:hover {
     background-color: #4A4A4A;
 }
-/* Style for selected resume widget */
 QFrame#resumeEntryWidget[selected="true"] {
-     background-color: #4285F4; /* Use theme highlight color */
+     background-color: #4285F4;
      border: 1px solid #5396F5;
 }
 QFrame#resumeEntryWidget[selected="true"] QLabel#resumeNameLabel {
-    color: white; /* White text when selected */
+    color: white;
 }
 QLabel#resumeNameLabel {
-    color: #E0E0E0; /* Default text color */
+    color: #E0E0E0;
 }
 
-
-/* --- Style for individual JD Widgets in Main Content --- */
 QFrame#jdEntryWidget {
     background-color: #383838;
     border: 1px solid #484848;
     border-radius: 4px;
-    min-height: 30px; /* Ensure minimum height */
+    min-height: 30px;
 }
 QFrame#jdEntryWidget:hover {
     background-color: #4A4A4A;
 }
-/* Style for selected JD widget */
 QFrame#jdEntryWidget[selected="true"] {
-     background-color: #007ACC; /* Different selection color for JDs? */
+     background-color: #007ACC;
      border: 1px solid #3399DD;
 }
 QFrame#jdEntryWidget[selected="true"] QLabel#jdNameLabel {
@@ -253,22 +204,7 @@ QLabel#jdNameLabel {
     color: #E0E0E0;
 }
 
-/* --- REMOVED Style for the JD Display Text Edit --- */
-/*
-QTextEdit#jdDisplayEdit {
-   border: 1px solid #555555;
-   padding: 5px;
-   background-color: #303030;
-   color: #CCCCCC;
-   border-radius: 6px;
-}
-*/
-
-/* Optional: Style for Status Labels inside Groups in Main Content */
 QLabel#resume_status_label, QLabel#jd_status_label {
     padding: 3px;
-    color: #BBBBBB; /* Slightly dimmer status text */
+    color: #BBBBBB;
 }
-
-
-/* Checkboxes use default theme style */

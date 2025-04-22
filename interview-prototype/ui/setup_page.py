@@ -1,14 +1,7 @@
 # ui/setup_page.py
-"""
-Defines the Setup Page QWidget for the Interview App.
-Implements an overlay sidebar effect using manual geometry management,
-with a close button inside the sidebar and significantly larger controls.
-Sidebar width adjusts to content. Adheres to Python style guidelines.
-Start button requires both resume and JD. Sidebar controls always enabled.
-"""
 import os
 import sys
-from pathlib import Path # Explicitly import Path if needed within this file
+from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel,
     QTextEdit, QLineEdit, QCheckBox, QGroupBox, QSizePolicy, QFrame,
@@ -17,14 +10,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont, QIcon, QResizeEvent
 from PyQt6.QtCore import Qt, QSize, QRect
 
-# --- Project Imports ---
 try:
     from core import logic, tts
     from .components import _load_icon
     from .resume_widget import ResumeWidget
     from .jd_widget import JDWidget
 except ImportError:
-    # Adjust path if running script directly or imports fail
     sys.path.append(
         os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     )
@@ -35,36 +26,25 @@ except ImportError:
 
 
 class SetupPage(QWidget):
-    """
-    Setup page with overlay sidebar for settings. Uses large fonts and controls.
-    Sidebar width adjusts automatically to content.
-    """
-    # Define minimum sidebar width instead of fixed width
     SIDEBAR_MIN_WIDTH = 240
 
     def __init__(self, parent_window, *args, **kwargs):
-        """Initializes the SetupPage."""
         super().__init__(parent=parent_window, *args, **kwargs)
         self.parent_window = parent_window
         self._selected_resume_widget = None
         self._selected_jd_widget = None
-        # Sidebar is a direct child of self for overlay effect
         self.sidebar_frame = QFrame(self)
 
         self._init_ui()
 
-        # Initial position update and hide after UI is built
-        # Force layout calculation for size hint before first geometry update
         if self.sidebar_frame.layout():
             self.sidebar_frame.layout().activate()
         self._update_sidebar_geometry()
-        self.sidebar_frame.hide() # Start hidden
+        self.sidebar_frame.hide()
 
     def _init_ui(self):
-        """Initialize the user interface elements."""
         pw = self.parent_window
 
-        # --- Fonts (Large Sizes) ---
         font_default_xxl = getattr(pw, 'font_default_xxl', QFont("Arial", 16))
         font_bold_xxl = getattr(
             pw, 'font_bold_xxl', QFont("Arial", 16, QFont.Weight.Bold)
@@ -74,31 +54,27 @@ class SetupPage(QWidget):
             pw, 'font_group_title_xxl', QFont("Arial", 18, QFont.Weight.Bold)
         )
 
-        # --- Icons ---
-        icon_path = getattr(pw, 'icon_path', 'icons') # Default path safely
+        icon_path = getattr(pw, 'icon_path', 'icons')
         upload_icon = _load_icon(icon_path, "upload.png")
         add_icon = _load_icon(icon_path, "plus_alt.png")
         start_icon = _load_icon(icon_path, "play.png")
         plus_icon = _load_icon(icon_path, "plus.png")
         minus_icon = _load_icon(icon_path, "minus.png")
         menu_icon = _load_icon(icon_path, "menu.png")
-        close_icon = _load_icon(icon_path, "cross_circle.png") # Close icon
+        close_icon = _load_icon(icon_path, "cross_circle.png")
 
-        # --- Sizes (Large Sizes) ---
         button_icon_size = QSize(28, 28)
-        small_button_icon_size = QSize(22, 22) # For +/- icons
-        toggle_icon_size = QSize(44, 44) # << Increased size for sidebar toggle icon
-        adjust_button_size = QSize(44, 44) # Keep button size large
+        small_button_icon_size = QSize(22, 22)
+        toggle_icon_size = QSize(44, 44)
+        adjust_button_size = QSize(44, 44)
         action_button_height = 55
         start_button_height = 60
-        sidebar_close_icon_size = QSize(38, 38) # << Increased size for X icon
+        sidebar_close_icon_size = QSize(38, 38)
 
-        # --- Main Page Layout (Vertical: Top Bar + Main Content Frame) ---
         page_layout = QVBoxLayout(self)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
 
-        # --- Top Bar (Toggle Button) ---
         top_bar_layout = QHBoxLayout()
         top_bar_layout.setContentsMargins(15, 10, 15, 10)
 
@@ -107,91 +83,80 @@ class SetupPage(QWidget):
         if menu_icon and not menu_icon.isNull():
             self.sidebar_toggle_btn.setIcon(menu_icon)
         else:
-            self.sidebar_toggle_btn.setText("☰") # Fallback symbol
+            self.sidebar_toggle_btn.setText("☰")
             self.sidebar_toggle_btn.setFont(font_default_xxl)
             print("Warning: Could not load menu.png icon for sidebar toggle.")
-        self.sidebar_toggle_btn.setIconSize(toggle_icon_size) # Apply larger icon size
-        self.sidebar_toggle_btn.setFixedSize(toggle_icon_size + QSize(12, 12)) # Increase button size slightly more than icon
+        self.sidebar_toggle_btn.setIconSize(toggle_icon_size)
+        self.sidebar_toggle_btn.setFixedSize(toggle_icon_size + QSize(12, 12))
         self.sidebar_toggle_btn.setToolTip("Toggle Sidebar Settings")
         self.sidebar_toggle_btn.setCheckable(True)
-        self.sidebar_toggle_btn.setChecked(False) # Start unchecked (hidden)
-        # Connect toggle button to the method that handles checked state
+        self.sidebar_toggle_btn.setChecked(False)
         self.sidebar_toggle_btn.clicked.connect(self._toggle_sidebar_from_button)
 
-        top_bar_layout.addStretch(1) # Push button right
+        top_bar_layout.addStretch(1)
         top_bar_layout.addWidget(self.sidebar_toggle_btn)
 
-        # --- Main Content Frame (Holds Lists and Start Button) ---
         self.main_content_frame = QFrame()
         self.main_content_frame.setObjectName("mainContentFrame")
         self.main_content_frame.setFrameShape(QFrame.Shape.NoFrame)
 
         main_content_layout = QVBoxLayout(self.main_content_frame)
-        main_content_layout.setContentsMargins(45, 30, 45, 45) # Inner padding
-        main_content_layout.setSpacing(45) # Inner spacing
+        main_content_layout.setContentsMargins(45, 30, 45, 45)
+        main_content_layout.setSpacing(45)
 
-        # Add top bar and main content frame to the page layout
         page_layout.addLayout(top_bar_layout)
         page_layout.addWidget(self.main_content_frame, stretch=1)
 
-        # --- Configure Sidebar Frame (Not in a layout) ---
         self.sidebar_frame.setObjectName("setupSidebar")
         self.sidebar_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.sidebar_frame.setFrameShadow(QFrame.Shadow.Raised)
         self.sidebar_frame.setMinimumWidth(self.SIDEBAR_MIN_WIDTH)
-        # Allow horizontal expansion based on content, up to a max
         self.sidebar_frame.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred
         )
 
-        # --- Layout *inside* the Sidebar ---
         sidebar_layout = QVBoxLayout(self.sidebar_frame)
-        # Store sidebar margins for width calculation later
-        self.sidebar_margins = QSize(30, 30) # L/R, T/B
+        self.sidebar_margins = QSize(30, 30)
         sidebar_layout.setContentsMargins(
-            self.sidebar_margins.width(),  # left
-            15,                             # top (reduced for close button)
-            self.sidebar_margins.width(),  # right
-            self.sidebar_margins.height()  # bottom
+            self.sidebar_margins.width(),
+            15,
+            self.sidebar_margins.width(),
+            self.sidebar_margins.height()
         )
         sidebar_layout.setSpacing(35)
         sidebar_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # --- Sidebar Top Bar (Close Button) ---
         sidebar_top_bar_layout = QHBoxLayout()
         sidebar_top_bar_layout.setContentsMargins(0, 0, 0, 0)
-        sidebar_top_bar_layout.addStretch(1) # Push close button right
+        sidebar_top_bar_layout.addStretch(1)
 
         self.sidebar_close_btn = QToolButton()
         self.sidebar_close_btn.setObjectName("sidebarCloseButton")
         if close_icon and not close_icon.isNull():
             self.sidebar_close_btn.setIcon(close_icon)
         else:
-            self.sidebar_close_btn.setText("X") # Fallback
+            self.sidebar_close_btn.setText("X")
             print("Warning: Could not load close icon (e.g., cross_circle.png).")
-        self.sidebar_close_btn.setIconSize(sidebar_close_icon_size) # Apply size
-        self.sidebar_close_btn.setFixedSize(sidebar_close_icon_size + QSize(10, 10)) # Adjust button size to fit icon + padding
+        self.sidebar_close_btn.setIconSize(sidebar_close_icon_size)
+        self.sidebar_close_btn.setFixedSize(sidebar_close_icon_size + QSize(10, 10))
         self.sidebar_close_btn.setToolTip("Close Settings")
-        self.sidebar_close_btn.clicked.connect(self.hide_sidebar) # Connect to hide method
+        self.sidebar_close_btn.clicked.connect(self.hide_sidebar)
 
         sidebar_top_bar_layout.addWidget(self.sidebar_close_btn)
 
-        # Add the top bar to the sidebar layout
         sidebar_layout.addLayout(sidebar_top_bar_layout)
         sidebar_layout.addSpacerItem(
             QSpacerItem(10, 15, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         )
 
-        # --- Populate Sidebar (Configuration Group) ---
         sidebar_config_group = QGroupBox("Interview Settings")
         sidebar_config_group.setFont(font_group_title_xxl)
 
         sidebar_config_layout = QVBoxLayout(sidebar_config_group)
-        sidebar_config_layout.setSpacing(30) # Spacing between sections
-        sidebar_config_layout.setContentsMargins(25, 25, 25, 25) # Group padding
+        sidebar_config_layout.setSpacing(30)
+        sidebar_config_layout.setContentsMargins(25, 25, 25, 25)
         sidebar_config_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # -- Topics Section --
         topics_section_layout = QVBoxLayout()
         topics_section_layout.setSpacing(8)
 
@@ -206,8 +171,8 @@ class SetupPage(QWidget):
         self.topic_minus_btn.setObjectName("adjustButton")
         if minus_icon:
             self.topic_minus_btn.setIcon(minus_icon)
-        self.topic_minus_btn.setIconSize(small_button_icon_size) # Smaller icon
-        self.topic_minus_btn.setFixedSize(adjust_button_size) # Large button
+        self.topic_minus_btn.setIconSize(small_button_icon_size)
+        self.topic_minus_btn.setFixedSize(adjust_button_size)
         self.topic_minus_btn.setToolTip("Decrease topics")
         self.topic_minus_btn.clicked.connect(lambda: pw._adjust_value('topics', -1))
 
@@ -220,20 +185,19 @@ class SetupPage(QWidget):
         self.topic_plus_btn.setObjectName("adjustButton")
         if plus_icon:
             self.topic_plus_btn.setIcon(plus_icon)
-        self.topic_plus_btn.setIconSize(small_button_icon_size) # Smaller icon
-        self.topic_plus_btn.setFixedSize(adjust_button_size) # Large button
+        self.topic_plus_btn.setIconSize(small_button_icon_size)
+        self.topic_plus_btn.setFixedSize(adjust_button_size)
         self.topic_plus_btn.setToolTip("Increase topics")
         self.topic_plus_btn.clicked.connect(lambda: pw._adjust_value('topics', +1))
 
         topics_button_layout.addWidget(self.topic_minus_btn)
         topics_button_layout.addWidget(self.num_topics_label)
         topics_button_layout.addWidget(self.topic_plus_btn)
-        topics_button_layout.addStretch(1) # Push buttons left
+        topics_button_layout.addStretch(1)
         topics_section_layout.addLayout(topics_button_layout)
 
-        sidebar_config_layout.addLayout(topics_section_layout) # Add section to group
+        sidebar_config_layout.addLayout(topics_section_layout)
 
-        # -- Follow-ups Section --
         followups_section_layout = QVBoxLayout()
         followups_section_layout.setSpacing(8)
 
@@ -248,8 +212,8 @@ class SetupPage(QWidget):
         self.followup_minus_btn.setObjectName("adjustButton")
         if minus_icon:
             self.followup_minus_btn.setIcon(minus_icon)
-        self.followup_minus_btn.setIconSize(small_button_icon_size) # Smaller icon
-        self.followup_minus_btn.setFixedSize(adjust_button_size) # Large button
+        self.followup_minus_btn.setIconSize(small_button_icon_size)
+        self.followup_minus_btn.setFixedSize(adjust_button_size)
         self.followup_minus_btn.setToolTip("Decrease follow-ups")
         self.followup_minus_btn.clicked.connect(lambda: pw._adjust_value('followups', -1))
 
@@ -262,20 +226,19 @@ class SetupPage(QWidget):
         self.followup_plus_btn.setObjectName("adjustButton")
         if plus_icon:
             self.followup_plus_btn.setIcon(plus_icon)
-        self.followup_plus_btn.setIconSize(small_button_icon_size) # Smaller icon
-        self.followup_plus_btn.setFixedSize(adjust_button_size) # Large button
+        self.followup_plus_btn.setIconSize(small_button_icon_size)
+        self.followup_plus_btn.setFixedSize(adjust_button_size)
         self.followup_plus_btn.setToolTip("Increase follow-ups")
         self.followup_plus_btn.clicked.connect(lambda: pw._adjust_value('followups', +1))
 
         followups_button_layout.addWidget(self.followup_minus_btn)
         followups_button_layout.addWidget(self.max_follow_ups_label)
         followups_button_layout.addWidget(self.followup_plus_btn)
-        followups_button_layout.addStretch(1) # Push buttons left
+        followups_button_layout.addStretch(1)
         followups_section_layout.addLayout(followups_button_layout)
 
-        sidebar_config_layout.addLayout(followups_section_layout) # Add section to group
+        sidebar_config_layout.addLayout(followups_section_layout)
 
-        # -- Checkboxes --
         self.speech_checkbox = QCheckBox("Use Speech Input (STT)")
         self.speech_checkbox.setFont(font_default_xxl)
         self.speech_checkbox.stateChanged.connect(pw.update_submit_button_text)
@@ -289,16 +252,13 @@ class SetupPage(QWidget):
             self.openai_tts_checkbox.stateChanged.connect(pw._handle_openai_tts_change)
         else:
             self.openai_tts_checkbox.setToolTip("OpenAI TTS unavailable.")
-            self.openai_tts_checkbox.setEnabled(False) # Keep disabled
+            self.openai_tts_checkbox.setEnabled(False)
         sidebar_config_layout.addWidget(self.openai_tts_checkbox)
 
-        sidebar_config_layout.addStretch(1) # Push content upwards
+        sidebar_config_layout.addStretch(1)
 
-        # Add the config group below the top bar in the sidebar
         sidebar_layout.addWidget(sidebar_config_group, stretch=1)
 
-        # --- Populate Main Content Area ---
-        # -- Resume Group --
         resume_group = QGroupBox()
         resume_group.setFont(font_group_title_xxl)
 
@@ -349,7 +309,6 @@ class SetupPage(QWidget):
             self.upload_resume_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
-        # -- Job Description Group --
         jd_group = QGroupBox()
         jd_group.setFont(font_group_title_xxl)
 
@@ -400,13 +359,11 @@ class SetupPage(QWidget):
             self.add_jd_btn, alignment=Qt.AlignmentFlag.AlignCenter
         )
 
-        # --- Layout for Side-by-Side Lists ---
         lists_layout = QHBoxLayout()
         lists_layout.setSpacing(45)
         lists_layout.addWidget(resume_group, stretch=1)
         lists_layout.addWidget(jd_group, stretch=1)
 
-        # --- Start Button ---
         self.start_interview_btn = QPushButton("Next: Start Interview")
         if start_icon:
             self.start_interview_btn.setIcon(start_icon)
@@ -423,18 +380,15 @@ class SetupPage(QWidget):
         start_button_layout.addWidget(self.start_interview_btn)
         start_button_layout.addStretch(1)
 
-        # --- Add components to main_content_layout ---
-        main_content_layout.addLayout(lists_layout, stretch=1) # Lists expand
+        main_content_layout.addLayout(lists_layout, stretch=1)
         main_content_layout.addSpacerItem(
             QSpacerItem(20, 60, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-        ) # Space before button
-        main_content_layout.addLayout(start_button_layout, stretch=0) # Button below
+        )
+        main_content_layout.addLayout(start_button_layout, stretch=0)
 
-        # --- Final Setup for the Page ---
         self.setLayout(page_layout)
 
     def _update_sidebar_geometry(self):
-        """Calculates and sets the sidebar's position and size based on content."""
         page_rect = self.rect()
         sidebar_height = page_rect.height()
 
@@ -451,14 +405,12 @@ class SetupPage(QWidget):
         )
 
     def resizeEvent(self, event: QResizeEvent):
-        """Override resizeEvent to reposition the sidebar."""
         super().resizeEvent(event)
         self._update_sidebar_geometry()
         if self.sidebar_frame.isVisible():
             self.sidebar_frame.raise_()
 
     def _toggle_sidebar(self, visible: bool):
-        """Shows or hides the sidebar overlay and updates toggle button state."""
         sidebar_exists = hasattr(self, 'sidebar_frame')
         toggle_exists = hasattr(self, 'sidebar_toggle_btn')
         if not sidebar_exists or not toggle_exists:
@@ -477,11 +429,9 @@ class SetupPage(QWidget):
         self.sidebar_toggle_btn.setChecked(self.sidebar_frame.isVisible())
 
     def _toggle_sidebar_from_button(self, checked: bool):
-        """Slot connected to the main toggle button's clicked(bool) signal."""
         self._toggle_sidebar(checked)
 
     def hide_sidebar(self):
-        """Specifically hides the sidebar, called by the internal close button."""
         self._toggle_sidebar(False)
 
     def update_widgets_from_state(self,
@@ -489,7 +439,6 @@ class SetupPage(QWidget):
                                   current_selection_path: str | None,
                                   recent_jd_data: list[dict],
                                   current_jd_name: str | None):
-        """Updates UI elements based on the application state."""
         pw = self.parent_window
         pdf_loaded = bool(current_selection_path)
         jd_loaded = bool(pw.job_description_text)
@@ -497,7 +446,6 @@ class SetupPage(QWidget):
         font_default_xxl = getattr(pw, 'font_default_xxl', QFont("Arial", 16))
         font_small_xxl = getattr(pw, 'font_small_xxl', QFont("Arial", 15))
 
-        # --- Populate Recent Resumes ---
         while self.resume_list_layout.count():
             item = self.resume_list_layout.takeAt(0)
             widget = item.widget()
@@ -518,9 +466,8 @@ class SetupPage(QWidget):
             self.resume_list_layout.addWidget(lbl)
         self.resume_list_layout.addStretch(1)
 
-        self.show_resume_selection_state(current_selection_path) # Pass only path
+        self.show_resume_selection_state(current_selection_path)
 
-        # --- Populate Recent Job Descriptions ---
         while self.jd_list_layout.count():
             item = self.jd_list_layout.takeAt(0)
             widget = item.widget()
@@ -541,9 +488,8 @@ class SetupPage(QWidget):
             self.jd_list_layout.addWidget(lbl)
         self.jd_list_layout.addStretch(1)
 
-        self.show_jd_selection_state(current_jd_name) # Pass only name
+        self.show_jd_selection_state(current_jd_name)
 
-        # --- Update Config Widgets ---
         if hasattr(self, 'num_topics_label'):
             self.num_topics_label.setText(str(pw.num_topics))
             self.num_topics_label.setFont(font_default_xxl)
@@ -559,13 +505,10 @@ class SetupPage(QWidget):
             self.openai_tts_checkbox.setChecked(pw.use_openai_tts)
             self.openai_tts_checkbox.blockSignals(False)
 
-        # Update enabled state of all controls
         self.set_controls_enabled_state(pdf_loaded, jd_loaded)
 
     def show_resume_selection_state(self, selected_path: str | None):
-        """Updates the resume status label and highlights the selected widget."""
-        selected_name_internal = None # Track name of the selected item internally
-        # Iterate through widgets to set visual state
+        selected_name_internal = None
         if hasattr(self, 'resume_list_layout'):
             for i in range(self.resume_list_layout.count()):
                 item = self.resume_list_layout.itemAt(i)
@@ -576,7 +519,6 @@ class SetupPage(QWidget):
                     if is_selected:
                         selected_name_internal = widget.resume_data.get("name")
 
-        # Update the status label
         if hasattr(self, 'resume_status_label'):
             font_small_xxl = getattr(
                 self.parent_window, 'font_small_xxl', QFont("Arial", 15)
@@ -595,8 +537,6 @@ class SetupPage(QWidget):
                 self.resume_status_label.setToolTip("")
 
     def show_jd_selection_state(self, selected_jd_name: str | None):
-        """Updates the JD status label and highlights the selected JD widget."""
-        # Iterate through widgets to set visual state
         if hasattr(self, 'jd_list_layout'):
             for i in range(self.jd_list_layout.count()):
                 item = self.jd_list_layout.itemAt(i)
@@ -604,9 +544,7 @@ class SetupPage(QWidget):
                 if isinstance(widget, JDWidget) and hasattr(widget, 'jd_data'):
                     is_selected = (widget.jd_data.get("name") == selected_jd_name)
                     widget.set_selected(is_selected)
-                    # No need to track widget here, only setting visual state
 
-        # Update the status label
         if hasattr(self, 'jd_status_label'):
             font_small_xxl = getattr(
                 self.parent_window, 'font_small_xxl', QFont("Arial", 15)
@@ -627,8 +565,6 @@ class SetupPage(QWidget):
                 self.jd_status_label.setToolTip("")
 
     def set_controls_enabled_state(self, pdf_loaded: bool, jd_loaded: bool):
-        """Enables/disables controls based on application state."""
-        # Sidebar controls are generally always enabled, except OpenAI TTS
         sidebar_controls_names = [
             'topic_minus_btn', 'topic_plus_btn', 'num_topics_label',
             'followup_minus_btn', 'followup_plus_btn', 'max_follow_ups_label',
@@ -639,13 +575,11 @@ class SetupPage(QWidget):
         for name in sidebar_controls_names:
             widget = getattr(self, name, None)
             if widget:
-                enable = True # Default to enabled
-                # Special case for OpenAI checkbox (depends on deps only)
+                enable = True
                 if widget == self.openai_tts_checkbox:
                     enable = openai_deps_met
                 widget.setEnabled(enable)
 
-        # Main content controls
         main_controls_names = [
             'start_interview_btn', 'upload_resume_btn', 'add_jd_btn',
             'resume_scroll_area', 'jd_scroll_area'
@@ -653,8 +587,7 @@ class SetupPage(QWidget):
         for name in main_controls_names:
             widget = getattr(self, name, None)
             if widget:
-                enable = True # Default to enabled
-                # Special case for start button (requires BOTH resume AND JD)
+                enable = True
                 if widget == self.start_interview_btn:
                     enable = pdf_loaded and jd_loaded
                 widget.setEnabled(enable)

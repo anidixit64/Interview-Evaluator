@@ -5,7 +5,6 @@ Uses f-string syntax for parameterization.
 """
 
 # --- Initial Questions Generation ---
-# ... (INITIAL_QUESTIONS_PROMPT_TEMPLATE remains the same) ...
 INITIAL_QUESTIONS_PROMPT_TEMPLATE = """
 You are a hiring manager preparing for a first-round screening interview.
 Generate exactly {num_questions} insightful and tailored interview questions based on the candidate's resume and the provided job description.
@@ -38,7 +37,6 @@ NO_JOB_DESC_SECTION = """
 
 
 # --- Follow-up Question Generation ---
-# ... (FOLLOW_UP_PROMPT_TEMPLATE remains the same) ...
 FOLLOW_UP_PROMPT_TEMPLATE = """
 You are an interviewer conducting a screening call.
 The original topic question was: "{context_question}"
@@ -59,7 +57,6 @@ Follow-up Question or End Signal:
 """
 
 # --- Summary Review Generation ---
-# ... (SUMMARY_REVIEW_PROMPT_TEMPLATE remains the same) ...
 SUMMARY_REVIEW_PROMPT_TEMPLATE = """
 Act as an objective hiring manager critically reviewing a candidate's screening interview performance based ONLY on the transcript below. Your goal is to assess their communication, clarity, and the substance of their answers in this specific conversation. Ignore misspellings or minor gramatical errors in their responses.
 
@@ -93,7 +90,6 @@ Ensure the analysis is balanced and constructive based ONLY on the transcript.
 
 
 # --- Content Score Generation ---
-# ... (CONTENT_SCORE_PROMPT_TEMPLATE remains the same) ...
 CONTENT_SCORE_PROMPT_TEMPLATE = """
 Analyze the structure, clarity, and relevance of the candidate's answers based ONLY on the provided interview transcript. Do not evaluate the *correctness* of the answers, only how well they were presented and if they addressed the questions asked.
 
@@ -115,8 +111,6 @@ Reasoning:
 
 
 # --- Qualification Assessment Generation ---
-
-# *** MODIFIED Prompt Section for Overall Fit ***
 QUALIFICATION_ASSESSMENT_PROMPT_TEMPLATE = """
 Act as a meticulous recruiter evaluating a candidate's potential fit for a specific role. Your task is to synthesize information ONLY from the provided Job Description, Candidate's Resume, and Interview Transcript to assess alignment with the key requirements.
 

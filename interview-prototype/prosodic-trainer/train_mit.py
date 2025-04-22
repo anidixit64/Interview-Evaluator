@@ -1,7 +1,5 @@
 # prosodic-trainer/train_mit.py
-# Trains a model to predict interview scores from prosodic features.
 
-# --- Imports ---
 import os
 import re
 import sys
@@ -14,17 +12,14 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-# --- Added for plotting ---
 try:
     import matplotlib.pyplot as plt
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
     print("Warning: matplotlib not found. Install it (`pip install matplotlib`) to generate plots.")
-# --- End plotting import ---
 
 
-# --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_DIR = os.path.join(SCRIPT_DIR, 'csvs')
 PROSODIC_FILE = os.path.join(CSV_DIR, 'prosodic_features.csv')
@@ -41,11 +36,7 @@ RANDOM_STATE = 42
 MODEL_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'model_output')
 MODEL_FILENAME = 'prosody_model_pipeline.joblib'
 FEATURES_FILENAME = 'prosody_model_features.joblib'
-PLOT_FILENAME = 'prediction_vs_actual_scatter.png' # Added plot filename
-
-# --- Column Renaming Map (FOCUS ON MAPPING CALCULATED_FEATURES) ---
-# Map OLD CSV column names (keys) to NEW standard names (values)
-# !! EDIT THIS MAP BASED ON YOUR ACTUAL CSV COLUMN NAMES !!
+PLOT_FILENAME = 'prediction_vs_actual_scatter.png' 
 COLUMN_RENAME_MAP = {
     # Pitch
     'mean_pitch': 'meanF0Hz', 'pitch_sd': 'stdevF0Hz', 'min_pitch': 'minF0Hz',
@@ -61,7 +52,7 @@ COLUMN_RENAME_MAP = {
     # Formants/Bandwidths
     'avgVal1': 'meanF1Hz', 'avgVal2': 'meanF2Hz', 'avgVal3': 'meanF3Hz',
     'avgBand1': 'avgBand1', 'avgBand2': 'avgBand2', 'avgBand3': 'avgBand3',
-    # --- Mark ALL OTHER CSV columns to be dropped (map to None) ---
+    # --- Mark ALL OTHER CSV columns are dropped (map to None) ---
     'energy': None, 'power': None, 'pitch_abs': None, 'pitch_quant': None,
     'Time:8': None, 'iDifference': None, 'diffPitchMaxMin': None,
     'diffPitchMaxMean': None, 'diffPitchMaxMode': None, 'intensityQuant': None,
@@ -73,27 +64,24 @@ COLUMN_RENAME_MAP = {
     'iInterval': None, 'MaxRising:3': None, 'MaxFalling:3': None,
     'AvgTotRis:3': None, 'AvgTotFall:3': None, 'numRising': None,
     'numFall': None, 'loudness': None, 'pitchUvsVRatio': None,
-    PARTICIPANT_ID_PROSODIC_COL: None, # Drop original ID after use
+    PARTICIPANT_ID_PROSODIC_COL: None, 
 }
 
-# Adjust map based on actual CSV header presence
 def adjust_map_for_csv(df_columns, rename_map):
     """ Creates final map, marking unmapped CSV columns for dropping. """
     adjusted_map = {}
     all_map_keys = list(rename_map.keys())
     for col in df_columns:
-        if col not in all_map_keys: adjusted_map[col] = None # Drop unmapped
+        if col not in all_map_keys: adjusted_map[col] = None 
     for key, value in rename_map.items():
-        if key in df_columns: adjusted_map[key] = value # Keep existing map if key exists
+        if key in df_columns: adjusted_map[key] = value 
     return adjusted_map
 
-# --- Create output directory ---
 os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 MODEL_PATH = os.path.join(MODEL_OUTPUT_DIR, MODEL_FILENAME)
 FEATURES_PATH = os.path.join(MODEL_OUTPUT_DIR, FEATURES_FILENAME)
-PLOT_PATH = os.path.join(MODEL_OUTPUT_DIR, PLOT_FILENAME) # Added plot path
+PLOT_PATH = os.path.join(MODEL_OUTPUT_DIR, PLOT_FILENAME)
 
-# --- Helper Function: Extract Participant ID ---
 def extract_participant_id(participant_question):
     """Extracts PXXX style ID. Converts PPXXX -> P(XXX+89)."""
     if pd.isna(participant_question): return None
@@ -109,7 +97,6 @@ def extract_participant_id(participant_question):
     print(f"Warning: Could not extract ID from '{participant_question}'")
     return None
 
-# --- Data Loading Function ---
 def load_dataframe(file_path, id_col_name):
     """Loads CSV, checks ID column, handles unnamed index."""
     print(f"Loading data from: {file_path}")
@@ -122,7 +109,6 @@ def load_dataframe(file_path, id_col_name):
     except FileNotFoundError: print(f"Error: File not found: {file_path}"); sys.exit(1)
     except Exception as e: print(f"Error loading {file_path}: {e}"); sys.exit(1)
 
-# --- Plotting Function ---
 def plot_predictions(y_test, y_pred, save_path):
     """Generates and saves a scatter plot of actual vs predicted values."""
     if not MATPLOTLIB_AVAILABLE:
@@ -135,14 +121,13 @@ def plot_predictions(y_test, y_pred, save_path):
     plt.xlabel('Actual Overall Score')
     plt.ylabel('Predicted Overall Score')
 
-    # Add ideal prediction line (y=x)
-    min_val = min(y_test.min(), y_pred.min()) - 0.5 # Add buffer
-    max_val = max(y_test.max(), y_pred.max()) + 0.5 # Add buffer
+    min_val = min(y_test.min(), y_pred.min()) - 0.5
+    max_val = max(y_test.max(), y_pred.max()) + 0.5
     plt.plot([min_val, max_val], [min_val, max_val], 'r--', label='Ideal Prediction (y=x)')
 
     plt.xlim(min_val, max_val)
     plt.ylim(min_val, max_val)
-    plt.gca().set_aspect('equal', adjustable='box') # Ensure square plot with 45-deg line
+    plt.gca().set_aspect('equal', adjustable='box')
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
@@ -152,16 +137,13 @@ def plot_predictions(y_test, y_pred, save_path):
         print(f"\nScatter plot saved to: {save_path}")
     except Exception as e:
         print(f"\nError saving scatter plot: {e}")
-    # plt.show() # Uncomment to display plot interactively
-    plt.close() # Close plot figure to free memory
+    plt.close()
 
 
 # --- Main Training Logic ---
 if __name__ == "__main__":
-    # Load DataFrames
     df_prosodic = load_dataframe(PROSODIC_FILE, PARTICIPANT_ID_PROSODIC_COL)
     df_turker = load_dataframe(TURKER_FILE, PARTICIPANT_ID_TURKER_COL)
-
     # --- Preprocessing Prosodic Data ---
     print("Preprocessing prosodic data...")
     ADJUSTED_MAP = adjust_map_for_csv(df_prosodic.columns, COLUMN_RENAME_MAP)
@@ -190,13 +172,11 @@ if __name__ == "__main__":
         df_prosodic = df_prosodic.rename(columns=rename_map_applicable)
     else: print("  - No columns needed renaming.")
 
-    # Identify numeric features from the *remaining* columns
     numeric_cols = df_prosodic.select_dtypes(include=np.number).columns.tolist()
     feature_columns = [col for col in numeric_cols if col != 'Participant_ID']
     print(f"  - Identified {len(feature_columns)} potential numeric features for aggregation.")
     if not feature_columns: print("Error: No numeric features left."); sys.exit(1)
 
-    # Coerce features to numeric, aggregate
     for col in feature_columns:
         df_prosodic[col] = pd.to_numeric(df_prosodic[col], errors='coerce')
         if df_prosodic[col].isnull().all(): print(f"  - Warning: '{col}' all NaN after coercion. Excluding."); feature_columns.remove(col)
@@ -216,7 +196,6 @@ if __name__ == "__main__":
     df_turker_aggr = df_turker_aggr.dropna(subset=[TARGET_COLUMN])
     print(f"  - Turker preprocessing complete. Shape: {df_turker_aggr.shape}")
 
-    # --- Merging Data ---
     print("Merging prosodic and Turker data...")
     df_merged = pd.merge(df_prosodic_avg, df_turker_aggr, on='Participant_ID', how='inner')
     print(f"  - Initial merged shape: {df_merged.shape}")
@@ -225,12 +204,10 @@ if __name__ == "__main__":
     print(f"  - Shape after dropping NaNs: {df_merged.shape}")
     if df_merged.empty: print("Error: Merged dataframe empty."); sys.exit(1)
 
-    # --- Prepare Data for Modeling ---
     X = df_merged[final_feature_columns]
     y = df_merged[TARGET_COLUMN]
     print(f"Data prepared. X shape: {X.shape}, y shape: {y.shape}")
 
-    # --- Feature Selection ---
     print("Performing feature selection...")
     temp_pipeline = Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())])
     try: X_temp_scaled = temp_pipeline.fit_transform(X)
@@ -262,7 +239,6 @@ if __name__ == "__main__":
     pipeline.fit(X_train, y_train)
     print("Model training complete.")
 
-    # --- Save the Model and Updated Features List ---
     print(f"Saving trained pipeline to: {MODEL_PATH}")
     try: joblib.dump(pipeline, MODEL_PATH); print("  - Pipeline saved successfully.")
     except Exception as e: print(f"Error saving pipeline: {e}")
@@ -281,8 +257,7 @@ if __name__ == "__main__":
     predictions_df = pd.DataFrame({'Actual': y_test.values, 'Predicted': y_pred}, index=y_test.index)
     print("\nSample Predictions vs Actual:"); print(predictions_df.head(10).to_string())
 
-    # --- Generate and Save Plot ---
     print("\nGenerating prediction scatter plot...")
-    plot_predictions(y_test, y_pred, PLOT_PATH) # Call the plotting function
+    plot_predictions(y_test, y_pred, PLOT_PATH)
 
     print("\n--- Training Script Finished ---")
