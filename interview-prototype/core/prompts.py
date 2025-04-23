@@ -13,7 +13,7 @@ Your questions should aim to:
   2. Probe deeper into specific skills, experiences, or projects mentioned in the resume that seem relevant.
   3. Identify potential gaps or areas needing clarification.
 Avoid generic questions. Phrase them clearly as conversation starters.
-Format the output ONLY as a numbered list, with each question on a new line (e.g., '1. Question text'). Do not include any introductory or concluding text, just the numbered questions.
+Format the output ONLY as a numbered list, with each question on a new line (e.g., '1. Question text'). Do not include any introductory or concluding text, just the numbered questions. Make each question as short as possible.
 
 Candidate's Resume Text:
 ---
