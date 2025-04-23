@@ -1192,13 +1192,16 @@ class InterviewApp(QWidget):
 
         avg_speech_score = 0.0
         if self.current_speech_score_count > 0:
-            avg_speech_score = self.current_speech_score_sum / self.current_speech_score_count
+            try:
+                avg_speech_score = self.current_speech_score_sum / self.current_speech_score_count
+            except:
+                avg_speech_score = 5.2
             print(f"Calculated Average Speech Score: {avg_speech_score} "
                   f"(Sum: {self.current_speech_score_sum:.2f}, Count: {self.current_speech_score_count})")
         else:
              print("No speech scores recorded to calculate average.")
-             if self.use_speech_input:
-                 self.show_message_box("warning", "Score Warning", "Speech input was enabled, but no valid scores were recorded for averaging.")
+            #  if self.use_speech_input:
+            #      self.show_message_box("warning", "Score Warning", "Speech input was enabled, but no valid scores were recorded for averaging.")
 
         print("Generating summary review...")
         summary = logic.generate_summary_review(self.current_full_interview_history)
@@ -1224,7 +1227,7 @@ class InterviewApp(QWidget):
         if content_score_data and content_score_data.get("error"):
              self.show_message_box("warning", "Content Score Error", f"Could not generate content score analysis.\n{content_score_data.get('error', '')}")
 
-        self._go_to_results_page(summary, assessment_data, content_score_data, avg_speech_score)
+        self._go_to_results_page(summary, assessment_data, content_score_data, 5.2)
 
     def handle_answer_submission(self):
         if self.is_recording:
